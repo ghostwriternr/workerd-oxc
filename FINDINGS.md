@@ -353,8 +353,28 @@ Interpretation caveats:
 - Leaf updates reuse unchanged transformed modules and unchanged graph specifier scans while still recomputing reachability and emitting complete Worker Loader module maps.
 - Package snapshot updates reuse local transformed modules and rebuild only the package graph.
 
+### Dynamic Worker build IDs
+
+`hashDynamicWorkerBuild(build)` and `dynamicWorkerBuildId(prefix, build)` now connect the builder/session output to Worker Loader's documented ID cache model. The helper hashes the complete `mainModule + modules` content only when a caller asks for it, so normal compiles do not pay hashing cost.
+
+Behavior:
+
+- deterministic across module-map insertion order;
+- includes `mainModule`, sorted module keys, module content type tags, strings, canonical JSON values, and `ArrayBuffer` bytes for `{ data }` / `{ wasm }`;
+- canonicalizes JSON object key order;
+- rejects failed or incomplete build outputs with `TypeError`;
+- returns IDs shaped as `<prefix>:<16-hex-hash>`.
+
+This helper is intended for revision-style Worker Loader IDs such as `project-a:0123abcd...`. It is not a cryptographic security primitive.
+
 Evidence:
 
+- `tests/workers/build-id.test.ts`
+  - proves deterministic hash behavior;
+  - proves changed content changes IDs;
+  - proves JSON and binary object modules participate in the hash;
+  - proves failed builds throw;
+  - proves generated IDs can be passed to `loadDynamicWorker()`.
 - `tests/workers/oxc/incremental-session.test.ts`
   - proves initial compile metadata;
   - proves leaf file updates and entrypoint graph changes;

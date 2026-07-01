@@ -150,6 +150,26 @@ The session tracks revisions and dirty metadata for first-party files, virtual m
 
 Session compiles now reuse unchanged transformed local-module and virtual-JS-module output when the rewritten source and resolution context are unchanged. They also cache Oxc module-specifier scan metadata for unchanged reachable files, so leaf edits do not need to reparse every file during graph discovery. The session still emits a complete Worker Loader module map on every successful compile because Dynamic Workers do not support partial module-map updates. Worker Loader also caches by ID, so changed code should use a new revision/hash-based ID when passed to `env.LOADER.get(id, callback)`. This cache reduces builder compile latency; it does not remove Dynamic Worker startup parsing/compilation for a newly loaded ID/code pair. The experimental API name is intentional: later work can refine dependency-aware invalidation and package graph caching behind the same shape without making the current metadata stable.
 
+### `hashDynamicWorkerBuild(build)` / `dynamicWorkerBuildId(prefix, build)`
+
+Helpers for matching Worker Loader's ID-based cache model. Cloudflare's Dynamic Worker docs require callers to use a new ID when code changes; these helpers hash the complete `mainModule + modules` content so callers can derive revision/hash-based IDs only when they need them:
+
+```ts
+import { dynamicWorkerBuildId, loadDynamicWorker } from "workers-tsx-toolchain-spike";
+
+const build = await session.compile();
+if (build.ok) {
+  const worker = loadDynamicWorker(
+    env.LOADER,
+    dynamicWorkerBuildId("project-a", build),
+    build,
+    { compatibilityDate: "2026-06-30" },
+  );
+}
+```
+
+The hash is deterministic across module insertion order, canonicalizes JSON object key order, includes object module type tags and `ArrayBuffer` bytes, and throws `TypeError` for failed or incomplete builds. It is a workerd-safe pure TypeScript helper, not a cryptographic security primitive.
+
 ### `toLoaderDefinition(build)` / `loadDynamicWorker(loader, id, build)`
 
 Helpers for turning successful output into the Dynamic Workers / Worker Loader shape and invoking `env.LOADER.get(id, ...)`.
@@ -200,6 +220,7 @@ The tests prove:
 - alternate full-AST controls are positive: `@babel/parser@8.0.0` returns a full Babel TSX AST inside workerd, the internal `experimentalParseReactTsxAst()` helper wraps it with diagnostics plus ranges/comments/tokens, and `@swc/wasm-web@1.15.43` initializes from an imported `WebAssembly.Module`; the internal `experimentalParseTransformReactTsxWithSwc()` helper parses TSX into an SWC AST and transforms TSX from either source or the parsed AST, but SWC remains archived spike evidence because of its bundle shape;
 - local relative multi-module graphs can be discovered through Oxc-backed graph metadata, transformed into Worker Loader modules, and loaded successfully;
 - `experimentalCreateDynamicWorkerBuildSession()` provides an edit-loop wrapper with revision/dirty metadata, file/virtual/package mutation methods, defensive snapshots, last-successful-build preservation across failed compiles, builder-side reuse of unchanged transformed module outputs, and graph-specifier scan reuse for unchanged reachable files;
+- `hashDynamicWorkerBuild()` and `dynamicWorkerBuildId()` provide deterministic content hashes and revision-style Worker Loader IDs for complete Dynamic Worker module maps;
 - `npm run test:session-cache` records local workerd/Vitest timing signals comparing cold `compileDynamicWorker()` with session initial compiles, cached leaf updates, graph updates, and package snapshot updates for generated module graphs, including graph scanned/reused module counts;
 - caller-provided virtual bare modules (`string` shorthand, `{ js }`, `{ json }`, `{ text }`, `{ data }`, or `{ wasm }`) can satisfy imports such as `react/jsx-runtime`, including automatic JSX output from Oxc transform; JS virtual modules can import other virtual modules, and object modules are emitted as leaf Worker Loader modules;
 - actual React 19.2.7 / React DOM 19.2.7 CJS production package files can server-render through Worker Loader without bundling both as a manual `{ cjs }` control map and as resolver-produced output from an exact in-memory `packageFiles` snapshot; the constrained resolver selects the `workerd` server export and rewrites literal `require("react")` / `require("react-dom")` calls to explicit Worker Loader module specifiers;
@@ -210,7 +231,7 @@ The tests prove:
 - `npm run test:risk` records raw/gzip artifact-size proxies, Wrangler dry-run bundle/startup-shape signals, and local workerd memory-observability signals; raw package artifact sizes and dry-run upload sizes are not production cold-start or RSS measurements, and local `process.memoryUsage()` currently reports zero-valued fields rather than meaningful RSS;
 - missing local imports and unsupported bare imports return structured diagnostics, not crashes;
 - Oxc runtime failures are structured diagnostics, not crashes; Rolldown blocked-runtime behavior remains covered as experiment evidence rather than the active compile path;
-- failed compiler output cannot be accidentally passed to Worker Loader;
+- failed compiler output cannot be accidentally passed to Worker Loader or hashed into a Dynamic Worker build ID;
 - Vite, rolldown-vite, Oxlint, and Oxfmt are classified as development/build/CLI tooling rather than workerd runtime builder APIs.
 
 ## Current result
