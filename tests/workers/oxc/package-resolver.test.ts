@@ -209,7 +209,7 @@ exports.message = "cjs " + dep.message;
     expect(await response.text()).toBe("cjs dependency");
   });
 
-  it("returns diagnostics for dynamic package requires", async () => {
+  it("returns source locations for dynamic package requires", async () => {
     const build = await compileDynamicWorker({
       entrypoint: "src/index.ts",
       files: {
@@ -235,7 +235,102 @@ module.exports = require(name);
       expect.objectContaining({
         tool: "internal",
         kind: "transform-failed",
-        message: expect.stringContaining("Dynamic require is not supported")
+        message: expect.stringContaining("Dynamic require is not supported"),
+        file: "node_modules/dynamic-cjs/index.cjs",
+        line: 2,
+        column: 18,
+        span: { start: 43, end: 51 }
+      })
+    );
+  });
+
+  it("returns source locations for missing literal CJS package requires", async () => {
+    const build = await compileDynamicWorker({
+      entrypoint: "src/index.ts",
+      files: {
+        "src/index.ts": `import value from "missing-cjs";
+export default { fetch() { return new Response(String(value)); } };
+`
+      },
+      packageFiles: {
+        "node_modules/missing-cjs/package.json": JSON.stringify({ name: "missing-cjs", main: "index.cjs" }),
+        "node_modules/missing-cjs/index.cjs": `const dep = require("./missing.cjs");
+exports.value = dep.value;
+`
+      }
+    });
+
+    expect(build.ok).toBe(false);
+    expect(build.diagnostics).toContainEqual(
+      expect.objectContaining({
+        tool: "internal",
+        kind: "transform-failed",
+        message: expect.stringContaining("Could not resolve ./missing.cjs required by package module node_modules/missing-cjs/index.cjs"),
+        file: "node_modules/missing-cjs/index.cjs",
+        line: 1,
+        column: 21,
+        span: { start: 20, end: 35 }
+      })
+    );
+  });
+
+  it("returns source locations for missing ESM package imports", async () => {
+    const build = await compileDynamicWorker({
+      entrypoint: "src/index.ts",
+      files: {
+        "src/index.ts": `import { message } from "missing-esm";
+export default { fetch() { return new Response(message); } };
+`
+      },
+      packageFiles: {
+        "node_modules/missing-esm/package.json": JSON.stringify({ name: "missing-esm", exports: "./index.js" }),
+        "node_modules/missing-esm/index.js": `import { value } from "./missing.js";
+export const message = value;
+`
+      }
+    });
+
+    expect(build.ok).toBe(false);
+    expect(build.diagnostics).toContainEqual(
+      expect.objectContaining({
+        tool: "internal",
+        kind: "transform-failed",
+        message: expect.stringContaining("Could not resolve ./missing.js imported by package module node_modules/missing-esm/index.js"),
+        file: "node_modules/missing-esm/index.js",
+        line: 1,
+        column: 23,
+        span: { start: 22, end: 36 }
+      })
+    );
+  });
+
+  it("returns source locations for dynamic ESM package imports", async () => {
+    const build = await compileDynamicWorker({
+      entrypoint: "src/index.ts",
+      files: {
+        "src/index.ts": `import { message } from "dynamic-esm";
+export default { fetch() { return new Response(message); } };
+`
+      },
+      packageFiles: {
+        "node_modules/dynamic-esm/package.json": JSON.stringify({ name: "dynamic-esm", exports: "./index.js" }),
+        "node_modules/dynamic-esm/index.js": `export const message = String(import("./dep.js"));
+`,
+        "node_modules/dynamic-esm/dep.js": `export const dep = "dep";
+`
+      }
+    });
+
+    expect(build.ok).toBe(false);
+    expect(build.diagnostics).toContainEqual(
+      expect.objectContaining({
+        tool: "internal",
+        kind: "transform-failed",
+        message: expect.stringContaining("Dynamic imports are not supported in package modules: node_modules/dynamic-esm/index.js"),
+        file: "node_modules/dynamic-esm/index.js",
+        line: 1,
+        column: 38,
+        span: { start: 37, end: 47 }
       })
     );
   });

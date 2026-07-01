@@ -1,4 +1,4 @@
-import { diagnostic } from "../diagnostics";
+import { diagnostic, diagnosticAtSourceOffset } from "../diagnostics";
 import type { DynamicWorkerModuleContent, ToolchainDiagnostic } from "../types";
 import type { ModuleSpecifier, ModuleSpecifierScanner } from "./module-graph";
 
@@ -18,6 +18,11 @@ interface CjsRequireSpecifier {
   specifier: string;
   start: number;
   end: number;
+  callStart: number;
+  callEnd: number;
+}
+
+interface CjsRequireCall {
   callStart: number;
   callEnd: number;
 }
@@ -110,8 +115,16 @@ export async function buildPackageModuleGraph(
     const isCjs = modulePath.endsWith(".cjs") || /\bmodule\.exports\b|\bexports\./.test(source) || /\brequire\s*\(/.test(source);
     if (isCjs) {
       const literalRequires = scanLiteralRequires(source);
-      if (containsDynamicRequire(source, literalRequires)) {
-        diagnostics.push(diagnostic("internal", "transform-failed", `Dynamic require is not supported in package module ${modulePath}.`));
+      const dynamicRequire = firstDynamicRequire(source, literalRequires);
+      if (dynamicRequire !== undefined) {
+        diagnostics.push(
+          diagnosticAtSourceOffset(
+            "internal",
+            "transform-failed",
+            `Dynamic require is not supported in package module ${modulePath}.`,
+            { source, offset: dynamicRequire.callStart, end: dynamicRequire.callEnd, file: modulePath }
+          )
+        );
         continue;
       }
 
@@ -119,7 +132,14 @@ export async function buildPackageModuleGraph(
         .map((required) => {
           const resolved = resolvePackageModuleImport(modulePath, required.specifier, packageFiles);
           if (resolved === undefined) {
-            diagnostics.push(diagnostic("internal", "transform-failed", `Could not resolve ${required.specifier} required by package module ${modulePath}.`));
+            diagnostics.push(
+              diagnosticAtSourceOffset(
+                "internal",
+                "transform-failed",
+                `Could not resolve ${required.specifier} required by package module ${modulePath}.`,
+                { source, offset: required.start, end: required.end, file: modulePath }
+              )
+            );
             return undefined;
           }
           queue.push(resolved.modulePath);
@@ -147,14 +167,28 @@ export async function buildPackageModuleGraph(
     for (const specifier of specifiers) {
       if (specifier.isTypeOnly) continue;
       if (specifier.kind === "dynamic") {
-        diagnostics.push(diagnostic("internal", "transform-failed", `Dynamic imports are not supported in package modules: ${modulePath}`));
+        diagnostics.push(
+          diagnosticAtSourceOffset(
+            "internal",
+            "transform-failed",
+            `Dynamic imports are not supported in package modules: ${modulePath}`,
+            { source, offset: specifier.start, end: specifier.end, file: modulePath }
+          )
+        );
         continue;
       }
       if (specifier.specifier === undefined) continue;
 
       const resolved = resolvePackageModuleImport(modulePath, specifier.specifier, packageFiles);
       if (resolved === undefined) {
-        diagnostics.push(diagnostic("internal", "transform-failed", `Could not resolve ${specifier.specifier} imported by package module ${modulePath}.`));
+        diagnostics.push(
+          diagnosticAtSourceOffset(
+            "internal",
+            "transform-failed",
+            `Could not resolve ${specifier.specifier} imported by package module ${modulePath}.`,
+            { source, offset: specifier.start, end: specifier.end, file: modulePath }
+          )
+        );
         continue;
       }
 
@@ -222,13 +256,15 @@ function scanLiteralRequires(source: string): CjsRequireSpecifier[] {
   return requires;
 }
 
-function containsDynamicRequire(source: string, literalRequires = scanLiteralRequires(source)): boolean {
+function firstDynamicRequire(source: string, literalRequires = scanLiteralRequires(source)): CjsRequireCall | undefined {
   const pattern = /\brequire\s*\(/g;
   for (const match of source.matchAll(pattern)) {
     if (match.index === undefined) continue;
-    if (!literalRequires.some((literal) => literal.callStart === match.index)) return true;
+    if (!literalRequires.some((literal) => literal.callStart === match.index)) {
+      return { callStart: match.index, callEnd: match.index + match[0].length };
+    }
   }
-  return false;
+  return undefined;
 }
 
 function resolvePackageModuleImport(importerPath: string, specifier: string, packageFiles: Record<string, string>): PackageResolution | undefined {
