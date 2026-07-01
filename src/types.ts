@@ -86,6 +86,36 @@ export interface ReactWorkerBuildOutput {
   };
 }
 
+export interface DynamicWorkerBuildSessionMetadata {
+  revision: number;
+  changedFiles: string[];
+  deletedFiles: string[];
+  changedVirtualModules: string[];
+  deletedVirtualModules: string[];
+  changedPackageFiles: string[];
+  deletedPackageFiles: string[];
+  reusedLastGoodBuild: boolean;
+  lastSuccessfulRevision?: number;
+}
+
+export interface DynamicWorkerBuildSessionCompileResult extends ReactWorkerBuildOutput {
+  session: DynamicWorkerBuildSessionMetadata;
+}
+
+export interface DynamicWorkerBuildSession {
+  readonly revision: number;
+  compile(): Promise<DynamicWorkerBuildSessionCompileResult>;
+  updateFile(path: string, source: string): void;
+  deleteFile(path: string): void;
+  setVirtualModule(path: string, content: DynamicWorkerVirtualModuleContent): void;
+  deleteVirtualModule(path: string): void;
+  setPackageFile(path: string, source: string): void;
+  deletePackageFile(path: string): void;
+  reset(input: ReactWorkerBuildInput): void;
+  snapshotInput(): ReactWorkerBuildInput;
+  getLastSuccessfulBuild(): ReactWorkerBuildOutput | undefined;
+}
+
 export interface WorkerLoaderBinding {
   get(
     id: string,

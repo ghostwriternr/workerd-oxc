@@ -16,6 +16,7 @@ import type {
 export type * from "./types";
 export { TSX_COMPONENT_FIXTURE, WORKER_ENTRY_FIXTURE, REACT_WORKER_FIXTURE } from "./fixtures";
 export { toLoaderDefinition, loadDynamicWorker };
+export { experimentalCreateDynamicWorkerBuildSession } from "./oxc/session";
 
 /**
  * Compile a workerd-targeted React/TSX Worker into modules suitable for the

@@ -126,6 +126,30 @@ if (result.ok) {
 
 It initializes `@swc/wasm-web` from an imported Worker `WebAssembly.Module`, parses TSX into an SWC AST, and transforms TSX to automatic-runtime ESM JavaScript. These helpers are deliberately not part of the package's public workflow API yet, and SWC is not wired into `compileDynamicWorker()`.
 
+### Experimental build sessions
+
+`experimentalCreateDynamicWorkerBuildSession(input)` provides a public-but-experimental edit-loop wrapper around the Oxc-first compiler path:
+
+```ts
+import { experimentalCreateDynamicWorkerBuildSession } from "workers-tsx-toolchain-spike";
+
+const session = experimentalCreateDynamicWorkerBuildSession(input);
+const first = await session.compile();
+
+session.updateFile("src/component.tsx", nextSource);
+const second = await session.compile();
+
+if (!second.ok) {
+  // Failed compiles do not replace the last successful build.
+  const lastGood = session.getLastSuccessfulBuild();
+  console.log(lastGood?.mainModule);
+}
+```
+
+The session tracks revisions and dirty metadata for first-party files, virtual modules, and in-memory package snapshot files. It also returns defensive copies from `snapshotInput()` and `getLastSuccessfulBuild()` so callers cannot mutate internal session state by accident.
+
+This first implementation proves the workflow semantics. It still delegates each `compile()` call to the existing Oxc parser/transform graph path rather than performing true per-module transform caching. The experimental API name is intentional: later work can add parser/transform handle reuse, dependency-aware invalidation, package graph caching, and per-module transform caches behind the same shape.
+
 ### `toLoaderDefinition(build)` / `loadDynamicWorker(loader, id, build)`
 
 Helpers for turning successful output into the Dynamic Workers / Worker Loader shape and invoking `env.LOADER.get(id, ...)`.
@@ -174,6 +198,7 @@ The tests prove:
 - Node `oxc-parser` returns a full TSX `Program` AST, and the raw workerd/wasmkernel parser path returns a one-shot serialized `program` JSON string; the internal `experimentalParseReactTsxAstWithOxc()` helper materializes that JSON into a full Oxc/ESTree-style `Program` and applies Oxc's BigInt/RegExp literal fixes;
 - alternate full-AST controls are positive: `@babel/parser@8.0.0` returns a full Babel TSX AST inside workerd, the internal `experimentalParseReactTsxAst()` helper wraps it with diagnostics plus ranges/comments/tokens, and `@swc/wasm-web@1.15.43` initializes from an imported `WebAssembly.Module`; the internal `experimentalParseTransformReactTsxWithSwc()` helper parses TSX into an SWC AST and transforms TSX from either source or the parsed AST, but SWC remains archived spike evidence because of its bundle shape;
 - local relative multi-module graphs can be discovered through Oxc-backed graph metadata, transformed into Worker Loader modules, and loaded successfully;
+- `experimentalCreateDynamicWorkerBuildSession()` provides an edit-loop wrapper with revision/dirty metadata, file/virtual/package mutation methods, defensive snapshots, and last-successful-build preservation across failed compiles;
 - caller-provided virtual bare modules (`string` shorthand, `{ js }`, `{ json }`, `{ text }`, `{ data }`, or `{ wasm }`) can satisfy imports such as `react/jsx-runtime`, including automatic JSX output from Oxc transform; JS virtual modules can import other virtual modules, and object modules are emitted as leaf Worker Loader modules;
 - actual React 19.2.7 / React DOM 19.2.7 CJS production package files can server-render through Worker Loader without bundling both as a manual `{ cjs }` control map and as resolver-produced output from an exact in-memory `packageFiles` snapshot; the constrained resolver selects the `workerd` server export and rewrites literal `require("react")` / `require("react-dom")` calls to explicit Worker Loader module specifiers;
 - 10-module and 50-module local graph stress cases compile successfully in workerd, with timing output available from the stress test;

@@ -270,6 +270,31 @@ Recommended near-term split:
 - Existing Dynamic Worker graph transform: keep Oxc parser/transform path until SWC operational measurements prove better.
 - Bundling: continue to defer Rolldown/Rspack/Farm/Parcel until their workerd packaging constraints change.
 
+## Experimental incremental build sessions
+
+`experimentalCreateDynamicWorkerBuildSession(input)` now exposes a public experimental edit-loop API around the Oxc-first Dynamic Worker builder.
+
+The first implementation proves workflow semantics rather than true compiler-cache internals:
+
+- sessions track a monotonically increasing `revision`;
+- `compile()` returns the normal `ReactWorkerBuildOutput` fields plus session metadata for changed/deleted first-party files, virtual modules, and package snapshot files;
+- `updateFile()`, `deleteFile()`, `setVirtualModule()`, `deleteVirtualModule()`, `setPackageFile()`, and `deletePackageFile()` mutate a defensive session-owned input copy;
+- failed compiles return current diagnostics without replacing `getLastSuccessfulBuild()`;
+- recovery after failure updates the last-successful build and revision;
+- `snapshotInput()` and `getLastSuccessfulBuild()` return defensive copies so callers cannot mutate session internals accidentally.
+
+Current limitation: each session `compile()` still delegates to the existing Oxc parser/transform graph path. There is no per-module transform cache, package graph cache, or dependency-aware invalidation yet. Those are the next internal optimization step if the public experimental workflow shape continues to look right.
+
+Evidence:
+
+- `tests/workers/oxc/incremental-session.test.ts`
+  - proves initial compile metadata;
+  - proves leaf file updates and entrypoint graph changes;
+  - proves failed compiles preserve the last successful build;
+  - proves recovery updates last-successful state;
+  - proves virtual module and package file edits affect output and metadata;
+  - proves delete/reset/no-op behavior and defensive copies.
+
 ## Oxc full AST access in workerd
 
 Full TSX AST consumers need AST access inside workerd, so this spike now includes explicit AST control tests in addition to the builder's parser-metadata tests.
