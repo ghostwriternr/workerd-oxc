@@ -1,13 +1,54 @@
-import { transformEntrypointWithOxc } from "./transform";
+import { diagnostic, evidence, isProbablyWorkerd } from "../diagnostics";
+import { buildLocalModuleGraph } from "./module-graph";
+import { buildPackageModuleGraph } from "./package-resolver";
+import {
+  getOxcParserForRuntime,
+  getOxcTransformerForRuntime,
+  normalizePackageFilesForOxc,
+  normalizeVirtualModulesForOxc,
+  processModuleSpecifiersWithOxc,
+  scanModuleSpecifiersWithOxc,
+  transformOptionsForOxc,
+  type NormalizedVirtualModule
+} from "./transform";
 import type {
   DynamicWorkerBuildSession,
+  DynamicWorkerBuildSessionCacheMetadata,
   DynamicWorkerBuildSessionCompileResult,
   DynamicWorkerBuildSessionMetadata,
   DynamicWorkerModuleContent,
   DynamicWorkerVirtualModuleContent,
   ReactWorkerBuildInput,
-  ReactWorkerBuildOutput
+  ReactWorkerBuildOutput,
+  ToolchainDiagnostic,
+  ToolchainEvidence
 } from "../types";
+
+interface LocalModuleCacheEntry {
+  cacheKey: string;
+  outputPath: string;
+  content: DynamicWorkerModuleContent;
+  packageImports: string[];
+}
+
+interface VirtualModuleCacheEntry {
+  cacheKey: string;
+  outputPath: string;
+  content: DynamicWorkerModuleContent;
+  packageImports: string[];
+}
+
+interface PackageGraphCacheEntry {
+  cacheKey: string;
+  modules: Record<string, DynamicWorkerModuleContent>;
+}
+
+interface CompileCacheState {
+  localModules: Map<string, LocalModuleCacheEntry>;
+  virtualModules: Map<string, VirtualModuleCacheEntry>;
+  packageGraph?: PackageGraphCacheEntry;
+  outputPaths: Set<string>;
+}
 
 export function experimentalCreateDynamicWorkerBuildSession(input: ReactWorkerBuildInput): DynamicWorkerBuildSession {
   return new OxcDynamicWorkerBuildSession(input);
@@ -18,6 +59,7 @@ class OxcDynamicWorkerBuildSession implements DynamicWorkerBuildSession {
   #revision = 0;
   #lastSuccessfulBuild: ReactWorkerBuildOutput | undefined;
   #lastSuccessfulRevision: number | undefined;
+  #cache: CompileCacheState = emptyCacheState();
   #changedFiles = new Set<string>();
   #deletedFiles = new Set<string>();
   #changedVirtualModules = new Set<string>();
@@ -35,10 +77,12 @@ class OxcDynamicWorkerBuildSession implements DynamicWorkerBuildSession {
 
   async compile(): Promise<DynamicWorkerBuildSessionCompileResult> {
     const metadata = this.#metadata();
-    const result = await transformEntrypointWithOxc(this.snapshotInput());
+    const compiled = await compileWithCache(this.snapshotInput(), this.#cache);
+    metadata.cache = compiled.cacheMetadata;
 
-    if (result.ok) {
-      this.#lastSuccessfulBuild = cloneBuildOutput(result);
+    if (compiled.output.ok) {
+      this.#cache = compiled.cache;
+      this.#lastSuccessfulBuild = cloneBuildOutput(compiled.output);
       this.#lastSuccessfulRevision = this.#revision;
       metadata.lastSuccessfulRevision = this.#lastSuccessfulRevision;
     }
@@ -46,7 +90,7 @@ class OxcDynamicWorkerBuildSession implements DynamicWorkerBuildSession {
     this.#clearDirtySets();
 
     return {
-      ...result,
+      ...compiled.output,
       session: metadata
     };
   }
@@ -97,6 +141,7 @@ class OxcDynamicWorkerBuildSession implements DynamicWorkerBuildSession {
 
   reset(input: ReactWorkerBuildInput): void {
     this.#input = cloneInput(input);
+    this.#cache = emptyCacheState();
     this.#revision += 1;
     this.#clearDirtySets();
   }
@@ -145,6 +190,251 @@ class OxcDynamicWorkerBuildSession implements DynamicWorkerBuildSession {
   }
 }
 
+async function compileWithCache(input: ReactWorkerBuildInput, previousCache: CompileCacheState): Promise<{
+  output: ReactWorkerBuildOutput;
+  cache: CompileCacheState;
+  cacheMetadata: DynamicWorkerBuildSessionCacheMetadata;
+}> {
+  const diagnostics: ToolchainDiagnostic[] = [];
+  const events: ToolchainEvidence[] = [];
+  const transformedModules = new Set<string>();
+  const reusedModules = new Set<string>();
+  let packageGraphRebuilt = false;
+
+  const parserImportStart = performance.now();
+  let parser;
+  try {
+    parser = await getOxcParserForRuntime();
+    events.push(evidence("oxc-parser", "import", true, parserImportStart, isProbablyWorkerd() ? "reused oxc-parser wasm through @alexbruf/wasmkernel" : "imported browser/WASI parser entry"));
+  } catch (error) {
+    events.push(evidence("oxc-parser", "import", false, parserImportStart));
+    diagnostics.push(diagnostic("oxc-parser", "import-failed", "Could not initialize Oxc parser for session graph discovery.", error));
+    return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+  }
+
+  const transformerImportStart = performance.now();
+  let transformer;
+  try {
+    transformer = await getOxcTransformerForRuntime();
+    events.push(evidence("oxc-transform", "import", true, transformerImportStart, isProbablyWorkerd() ? "reused oxc-transform wasm through @alexbruf/wasmkernel" : "imported browser/WASI transform entry"));
+  } catch (error) {
+    events.push(evidence("oxc-transform", "import", false, transformerImportStart));
+    diagnostics.push(diagnostic("oxc-transform", "import-failed", "Could not initialize Oxc transform for session compile.", error));
+    return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+  }
+
+  const normalizedVirtualModules = normalizeVirtualModulesForOxc(input.virtualModules ?? {});
+  if (normalizedVirtualModules.diagnostics.length > 0) {
+    diagnostics.push(...normalizedVirtualModules.diagnostics);
+    return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+  }
+  const virtualModules = normalizedVirtualModules.modules;
+  const normalizedPackageFiles = input.packageFiles ? normalizePackageFilesForOxc(input.packageFiles) : undefined;
+  const graphInput = normalizedPackageFiles ? { ...input, packageFiles: normalizedPackageFiles } : input;
+
+  const graphStart = performance.now();
+  const graph = await buildLocalModuleGraph(graphInput, (filename, source) => scanModuleSpecifiersWithOxc(parser, filename, source));
+  events.push(evidence("oxc-transform", "bundle", graph.ok, graphStart, graph.ok ? `${graph.modules?.length ?? 0} local modules resolved from Oxc parser metadata` : "local module graph resolution failed"));
+  if (!graph.ok || graph.mainModule === undefined || graph.modules === undefined) {
+    diagnostics.push(...graph.diagnostics);
+    return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+  }
+
+  const nextCache: CompileCacheState = {
+    localModules: new Map(),
+    virtualModules: new Map(),
+    packageGraph: previousCache.packageGraph,
+    outputPaths: new Set()
+  };
+  const modules: Record<string, DynamicWorkerModuleContent> = {};
+  const packageImports = new Set(graph.packageImports);
+  const virtualResolutionKey = JSON.stringify(Object.entries(virtualModules).map(([name, module]) => [name, module.outputPath]).sort());
+  const packageResolutionKey = JSON.stringify(Object.entries(normalizedPackageFiles ?? {}).filter(([path]) => path.endsWith("/package.json")).sort());
+  const jsxKey = JSON.stringify(input.jsx ?? {});
+  const localContextKey = JSON.stringify({ jsxKey, virtualResolutionKey, packageResolutionKey });
+  const transformStart = performance.now();
+
+  try {
+    for (const module of graph.modules) {
+      const cacheKey = JSON.stringify({ source: module.source, localContextKey });
+      const cached = previousCache.localModules.get(module.inputPath);
+      if (cached?.cacheKey === cacheKey && cached.outputPath === module.outputPath) {
+        modules[module.outputPath] = cloneModuleContent(cached.content);
+        nextCache.localModules.set(module.inputPath, cloneLocalCacheEntry(cached));
+        nextCache.outputPaths.add(module.outputPath);
+        for (const packageImport of cached.packageImports) packageImports.add(packageImport);
+        reusedModules.add(module.outputPath);
+        continue;
+      }
+
+      if (typeof transformer.transformSync !== "function" && typeof transformer.transform !== "function") {
+        throw new Error("Oxc transform exports transformSync/transform are unavailable.");
+      }
+      const result = transformer.transformSync
+        ? transformer.transformSync(module.inputPath, module.source, transformOptionsForOxc(module.inputPath, input))
+        : await transformer.transform!(module.inputPath, module.source, transformOptionsForOxc(module.inputPath, input));
+      const code = result?.code;
+      const errors = collectArrayLike(result?.errors);
+      if (!code || errors.length > 0) {
+        events.push(evidence("oxc-transform", "transform", false, transformStart, `${errors.length} transform errors in ${module.inputPath}`));
+        diagnostics.push(diagnostic("oxc-transform", "transform-failed", `Oxc transform did not produce JavaScript for ${module.inputPath}.`, errors));
+        return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+      }
+
+      const processed = processModuleSpecifiersWithOxc(parser, module.outputPath, code, virtualModules, normalizedPackageFiles);
+      if (!processed.ok) {
+        events.push(evidence("oxc-transform", "transform", false, transformStart, `post-transform import validation failed in ${module.outputPath}`));
+        diagnostics.push(...processed.diagnostics);
+        return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+      }
+
+      for (const packageImport of processed.packageImports) packageImports.add(packageImport);
+      modules[module.outputPath] = processed.code;
+      nextCache.localModules.set(module.inputPath, {
+        cacheKey,
+        outputPath: module.outputPath,
+        content: processed.code,
+        packageImports: processed.packageImports
+      });
+      nextCache.outputPaths.add(module.outputPath);
+      transformedModules.add(module.outputPath);
+    }
+
+    for (const [name, virtualModule] of Object.entries(virtualModules)) {
+      if (virtualModule.js === undefined) {
+        modules[virtualModule.outputPath] = cloneModuleContent(virtualModule.content);
+        nextCache.outputPaths.add(virtualModule.outputPath);
+        continue;
+      }
+
+      const cacheKey = JSON.stringify({ js: virtualModule.js, virtualResolutionKey, packageResolutionKey });
+      const cached = previousCache.virtualModules.get(name);
+      if (cached?.cacheKey === cacheKey && cached.outputPath === virtualModule.outputPath) {
+        modules[virtualModule.outputPath] = cloneModuleContent(cached.content);
+        nextCache.virtualModules.set(name, cloneVirtualCacheEntry(cached));
+        nextCache.outputPaths.add(virtualModule.outputPath);
+        for (const packageImport of cached.packageImports) packageImports.add(packageImport);
+        reusedModules.add(virtualModule.outputPath);
+        continue;
+      }
+
+      const processed = processModuleSpecifiersWithOxc(parser, virtualModule.outputPath, virtualModule.js, virtualModules, normalizedPackageFiles);
+      if (!processed.ok) {
+        events.push(evidence("oxc-transform", "transform", false, transformStart, `virtual module import validation failed in ${virtualModule.outputPath}`));
+        diagnostics.push(...processed.diagnostics);
+        return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+      }
+      for (const packageImport of processed.packageImports) packageImports.add(packageImport);
+      const content = { js: processed.code };
+      modules[virtualModule.outputPath] = content;
+      nextCache.virtualModules.set(name, {
+        cacheKey,
+        outputPath: virtualModule.outputPath,
+        content,
+        packageImports: processed.packageImports
+      });
+      nextCache.outputPaths.add(virtualModule.outputPath);
+      transformedModules.add(virtualModule.outputPath);
+    }
+
+    const packageImportList = Array.from(packageImports).sort();
+    if (normalizedPackageFiles && packageImportList.length > 0) {
+      const packageCacheKey = JSON.stringify({ packageImportList, packageFiles: Object.entries(normalizedPackageFiles).sort() });
+      const cachedPackageGraph = previousCache.packageGraph;
+      if (cachedPackageGraph?.cacheKey === packageCacheKey) {
+        const collision = Object.keys(cachedPackageGraph.modules).find((key) => modules[key] !== undefined);
+        if (collision !== undefined) {
+          diagnostics.push(diagnostic("internal", "transform-failed", `Package module collision would overwrite existing module output: ${collision}`));
+          return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+        }
+        Object.assign(modules, cloneModuleMap(cachedPackageGraph.modules));
+        nextCache.packageGraph = clonePackageGraphCacheEntry(cachedPackageGraph);
+      } else {
+        packageGraphRebuilt = true;
+        const packageGraph = await buildPackageModuleGraph(
+          packageImportList,
+          normalizedPackageFiles,
+          (filename, source) => scanModuleSpecifiersWithOxc(parser, filename, source)
+        );
+        if (!packageGraph.ok) {
+          diagnostics.push(...packageGraph.diagnostics);
+          return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+        }
+        const collision = Object.keys(packageGraph.modules).find((key) => modules[key] !== undefined);
+        if (collision !== undefined) {
+          diagnostics.push(diagnostic("internal", "transform-failed", `Package module collision would overwrite existing module output: ${collision}`));
+          return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+        }
+        Object.assign(modules, cloneModuleMap(packageGraph.modules));
+        nextCache.packageGraph = { cacheKey: packageCacheKey, modules: cloneModuleMap(packageGraph.modules) };
+      }
+      for (const key of Object.keys(nextCache.packageGraph.modules)) nextCache.outputPaths.add(key);
+    } else {
+      nextCache.packageGraph = undefined;
+    }
+
+    const droppedModules = sortedDifference(previousCache.outputPaths, nextCache.outputPaths);
+    events.push(evidence("oxc-transform", "transform", true, transformStart, `${transformedModules.size} modules transformed, ${reusedModules.size} modules reused from session cache`));
+
+    return {
+      output: {
+        ok: true,
+        mainModule: graph.mainModule,
+        modules,
+        diagnostics,
+        evidence: events,
+        toolchain: { parser: "oxc-parser", transformer: "oxc-transform", loaderTarget: "worker-loader" }
+      },
+      cache: nextCache,
+      cacheMetadata: {
+        transformedModules: sorted(transformedModules),
+        reusedModules: sorted(reusedModules),
+        droppedModules,
+        graphRebuilt: true,
+        packageGraphRebuilt
+      }
+    };
+  } catch (error) {
+    events.push(evidence("oxc-transform", "transform", false, transformStart));
+    diagnostics.push(diagnostic("oxc-transform", "transform-failed", "Oxc transform imported but failed during cached session compile.", error));
+    return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, packageGraphRebuilt);
+  }
+}
+
+function failedCompile(
+  diagnostics: ToolchainDiagnostic[],
+  events: ToolchainEvidence[],
+  previousCache: CompileCacheState,
+  transformedModules: Set<string>,
+  reusedModules: Set<string>,
+  packageGraphRebuilt: boolean,
+): { output: ReactWorkerBuildOutput; cache: CompileCacheState; cacheMetadata: DynamicWorkerBuildSessionCacheMetadata } {
+  return {
+    output: {
+      ok: false,
+      diagnostics,
+      evidence: events,
+      toolchain: { parser: "oxc-parser", transformer: "oxc-transform", loaderTarget: "none" }
+    },
+    cache: previousCache,
+    cacheMetadata: {
+      transformedModules: sorted(transformedModules),
+      reusedModules: sorted(reusedModules),
+      droppedModules: [],
+      graphRebuilt: true,
+      packageGraphRebuilt
+    }
+  };
+}
+
+function emptyCacheState(): CompileCacheState {
+  return {
+    localModules: new Map(),
+    virtualModules: new Map(),
+    outputPaths: new Set()
+  };
+}
+
 function cloneInput(input: ReactWorkerBuildInput): ReactWorkerBuildInput {
   return {
     ...input,
@@ -175,6 +465,32 @@ function cloneBuildOutput(output: ReactWorkerBuildOutput): ReactWorkerBuildOutpu
     evidence: output.evidence.map((item) => ({ ...item })),
     toolchain: { ...output.toolchain }
   };
+}
+
+function cloneLocalCacheEntry(entry: LocalModuleCacheEntry): LocalModuleCacheEntry {
+  return {
+    cacheKey: entry.cacheKey,
+    outputPath: entry.outputPath,
+    content: cloneModuleContent(entry.content),
+    packageImports: [...entry.packageImports]
+  };
+}
+
+function cloneVirtualCacheEntry(entry: VirtualModuleCacheEntry): VirtualModuleCacheEntry {
+  return {
+    cacheKey: entry.cacheKey,
+    outputPath: entry.outputPath,
+    content: cloneModuleContent(entry.content),
+    packageImports: [...entry.packageImports]
+  };
+}
+
+function clonePackageGraphCacheEntry(entry: PackageGraphCacheEntry): PackageGraphCacheEntry {
+  return { cacheKey: entry.cacheKey, modules: cloneModuleMap(entry.modules) };
+}
+
+function cloneModuleMap(modules: Record<string, DynamicWorkerModuleContent>): Record<string, DynamicWorkerModuleContent> {
+  return Object.fromEntries(Object.entries(modules).map(([path, content]) => [path, cloneModuleContent(content)]));
 }
 
 function cloneModuleContent(content: DynamicWorkerModuleContent): DynamicWorkerModuleContent {
@@ -239,4 +555,22 @@ function normalizeSessionPath(path: string): string {
 
 function sorted(values: Set<string>): string[] {
   return Array.from(values).sort();
+}
+
+function sortedDifference(previous: Set<string>, next: Set<string>): string[] {
+  return Array.from(previous).filter((value) => !next.has(value)).sort();
+}
+
+function collectArrayLike(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "object" || value === null) return [];
+  if (Symbol.iterator in value && typeof value[Symbol.iterator] === "function") return Array.from(value as Iterable<unknown>);
+  const items: unknown[] = [];
+  const indexable = value as Record<number, unknown>;
+  for (let index = 0; index < 1000; index += 1) {
+    const item = indexable[index];
+    if (item === undefined) break;
+    items.push(item);
+  }
+  return items;
 }

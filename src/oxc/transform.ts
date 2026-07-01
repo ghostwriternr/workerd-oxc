@@ -18,7 +18,7 @@ import type {
 
 type OxcModuleRequest = { value?: string; start: number; end: number };
 
-type NormalizedVirtualModule = {
+export type NormalizedVirtualModule = {
   outputPath: string;
   content: DynamicWorkerModuleContent;
   js?: string;
@@ -55,13 +55,13 @@ type OxcParseResult = {
   };
 };
 
-type OxcParser = {
+export type OxcParser = {
   parseSync?: (filename: string, source: string, options?: unknown) => OxcParseResult;
 };
 
 type OxcTransformResult = { code?: string; errors?: unknown[] };
 
-type OxcTransformer = {
+export type OxcTransformer = {
   transform?: (filename: string, source: string, options?: unknown) => OxcTransformResult | Promise<OxcTransformResult>;
   transformSync?: (filename: string, source: string, options?: unknown) => OxcTransformResult;
 };
@@ -255,12 +255,23 @@ export async function transformEntrypointWithOxc(input: ReactWorkerBuildInput): 
   }
 }
 
+export function normalizePackageFilesForOxc(packageFiles: Record<string, string>): Record<string, string> {
+  return normalizePackageFiles(packageFiles);
+}
+
 function normalizePackageFiles(packageFiles: Record<string, string>): Record<string, string> {
   const normalized: Record<string, string> = {};
   for (const [path, source] of Object.entries(packageFiles)) {
     normalized[path.replace(/^\/+/, "").replace(/\\/g, "/")] = source;
   }
   return normalized;
+}
+
+export function normalizeVirtualModulesForOxc(virtualModules: NonNullable<ReactWorkerBuildInput["virtualModules"]>): {
+  modules: Record<string, NormalizedVirtualModule>;
+  diagnostics: ToolchainDiagnostic[];
+} {
+  return normalizeVirtualModules(virtualModules);
 }
 
 function normalizeVirtualModules(virtualModules: NonNullable<ReactWorkerBuildInput["virtualModules"]>): {
@@ -319,6 +330,16 @@ function normalizeVirtualModule(name: string, content: DynamicWorkerVirtualModul
   }
 
   return undefined;
+}
+
+export function processModuleSpecifiersWithOxc(
+  parser: OxcParser,
+  filename: string,
+  code: string,
+  virtualModules: Record<string, NormalizedVirtualModule>,
+  packageFiles?: Record<string, string>
+): { ok: true; code: string; packageImports: string[]; diagnostics: [] } | { ok: false; code: string; packageImports: string[]; diagnostics: ToolchainDiagnostic[] } {
+  return processModuleSpecifiers(parser, filename, code, virtualModules, packageFiles);
 }
 
 function processModuleSpecifiers(
@@ -437,7 +458,7 @@ function parseOptions(filename: string) {
   };
 }
 
-function scanModuleSpecifiersWithOxc(parser: OxcParser, filename: string, source: string): ModuleSpecifier[] {
+export function scanModuleSpecifiersWithOxc(parser: OxcParser, filename: string, source: string): ModuleSpecifier[] {
   if (typeof parser.parseSync !== "function") {
     throw new Error("Oxc parser export parseSync is unavailable.");
   }
@@ -628,6 +649,16 @@ function collectArrayLike(value: unknown): unknown[] {
   return items;
 }
 
+export async function getOxcParserForRuntime(): Promise<OxcParser> {
+  if (isProbablyWorkerd()) return getWasmkernelOxcParser();
+  return dynamicImport("oxc-parser/src-js/wasm.js") as Promise<OxcParser>;
+}
+
+export async function getOxcTransformerForRuntime(): Promise<OxcTransformer> {
+  if (isProbablyWorkerd()) return getWasmkernelOxcTransformer();
+  return dynamicImport("oxc-transform/browser.js") as Promise<OxcTransformer>;
+}
+
 function getWasmkernelOxcParser(): Promise<OxcParser> {
   wasmkernelParserPromise ??= (async () => {
     const wasi = new WASI([], [], [], { debug: false });
@@ -652,6 +683,10 @@ function getWasmkernelOxcTransformer(): Promise<OxcTransformer> {
     return napiModule.exports as OxcTransformer;
   })();
   return wasmkernelTransformerPromise;
+}
+
+export function transformOptionsForOxc(filename: string, input: ReactWorkerBuildInput) {
+  return transformOptions(filename, input);
 }
 
 function transformOptions(filename: string, input: ReactWorkerBuildInput) {

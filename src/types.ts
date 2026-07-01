@@ -86,6 +86,14 @@ export interface ReactWorkerBuildOutput {
   };
 }
 
+export interface DynamicWorkerBuildSessionCacheMetadata {
+  transformedModules: string[];
+  reusedModules: string[];
+  droppedModules: string[];
+  graphRebuilt: boolean;
+  packageGraphRebuilt: boolean;
+}
+
 export interface DynamicWorkerBuildSessionMetadata {
   revision: number;
   changedFiles: string[];
@@ -96,6 +104,7 @@ export interface DynamicWorkerBuildSessionMetadata {
   deletedPackageFiles: string[];
   reusedLastGoodBuild: boolean;
   lastSuccessfulRevision?: number;
+  cache?: DynamicWorkerBuildSessionCacheMetadata;
 }
 
 export interface DynamicWorkerBuildSessionCompileResult extends ReactWorkerBuildOutput {

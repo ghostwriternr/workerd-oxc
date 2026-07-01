@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { experimentalCreateDynamicWorkerBuildSession } from "../../../src/index";
+import { compileDynamicWorker, experimentalCreateDynamicWorkerBuildSession } from "../../../src/index";
 
 function basicInput(message = "hello") {
   return {
@@ -56,6 +56,13 @@ describe("experimental Oxc build session", () => {
       deletedPackageFiles: [],
       reusedLastGoodBuild: false,
       lastSuccessfulRevision: 0,
+      cache: {
+        transformedModules: ["src/index.js"],
+        reusedModules: [],
+        droppedModules: [],
+        graphRebuilt: true,
+        packageGraphRebuilt: false,
+      },
     });
   });
 
@@ -65,16 +72,34 @@ describe("experimental Oxc build session", () => {
     const first = await session.compile();
     expect(first.ok).toBe(true);
     expect(Object.keys(first.modules ?? {}).sort()).toEqual(["src/index.js", "src/message.js"]);
+    expect(first.session.cache).toMatchObject({
+      transformedModules: ["src/index.js", "src/message.js"],
+      reusedModules: [],
+      droppedModules: [],
+      graphRebuilt: true,
+      packageGraphRebuilt: false,
+    });
 
     session.updateFile("src/message.tsx", `export const message = "updated";`);
     expect(session.revision).toBe(1);
 
     const second = await session.compile();
     expect(second.ok).toBe(true);
+    expect(Object.keys(second.modules ?? {}).sort()).toEqual(["src/index.js", "src/message.js"]);
     expect(second.modules?.["src/message.js"]).toContain("updated");
     expect(second.session.changedFiles).toEqual(["src/message.tsx"]);
     expect(second.session.deletedFiles).toEqual([]);
+    expect(second.session.cache).toMatchObject({
+      transformedModules: ["src/message.js"],
+      reusedModules: ["src/index.js"],
+      droppedModules: [],
+      graphRebuilt: true,
+      packageGraphRebuilt: false,
+    });
     expect(second.session.lastSuccessfulRevision).toBe(1);
+    const coldSecond = await compileDynamicWorker(session.snapshotInput());
+    expect(coldSecond.ok).toBe(true);
+    expect(second.modules).toEqual(coldSecond.modules);
 
     session.updateFile("src/index.tsx", `
       import { other } from "./other";
@@ -89,40 +114,58 @@ describe("experimental Oxc build session", () => {
     expect(third.ok).toBe(true);
     expect(Object.keys(third.modules ?? {}).sort()).toEqual(["src/index.js", "src/other.js"]);
     expect(third.session.changedFiles).toEqual(["src/index.tsx"]);
+    expect(third.session.cache).toMatchObject({
+      transformedModules: ["src/index.js", "src/other.js"],
+      reusedModules: [],
+      droppedModules: ["src/message.js"],
+      graphRebuilt: true,
+      packageGraphRebuilt: false,
+    });
     expect(third.session.lastSuccessfulRevision).toBe(2);
   });
 
-  test("preserves the last successful build across failure and recovery", async () => {
-    const session = experimentalCreateDynamicWorkerBuildSession(basicInput("good"));
+  test("preserves the last successful build and cache across failure and recovery", async () => {
+    const session = experimentalCreateDynamicWorkerBuildSession(twoModuleInput("good"));
 
     const good = await session.compile();
     expect(good.ok).toBe(true);
     const lastGood = session.getLastSuccessfulBuild();
-    expect(lastGood?.modules?.["src/index.js"]).toContain("good");
+    expect(lastGood?.modules?.["src/message.js"]).toContain("good");
 
-    session.updateFile("src/index.tsx", `import "./missing"; export default { async fetch() { return new Response("bad") } }`);
+    session.updateFile("src/message.tsx", `export const message = "failed edit";`);
+    session.updateFile("src/index.tsx", `import { message } from "./message"; import "./missing"; export default { async fetch() { return new Response(message) } }`);
     const failed = await session.compile();
     expect(failed.ok).toBe(false);
-    expect(failed.session.changedFiles).toEqual(["src/index.tsx"]);
+    expect(failed.session.changedFiles).toEqual(["src/index.tsx", "src/message.tsx"]);
+    expect(failed.session.cache?.transformedModules).toEqual([]);
     expect(failed.session.lastSuccessfulRevision).toBe(0);
-    expect(session.getLastSuccessfulBuild()?.modules?.["src/index.js"]).toContain("good");
+    expect(session.getLastSuccessfulBuild()?.modules?.["src/message.js"]).toContain("good");
 
-    session.updateFile("src/index.tsx", `export default { async fetch() { return new Response("recovered") } }`);
+    session.updateFile("src/index.tsx", `import { message } from "./message"; export default { async fetch() { return new Response(message) } }`);
     const recovered = await session.compile();
     expect(recovered.ok).toBe(true);
-    expect(recovered.modules?.["src/index.js"]).toContain("recovered");
-    expect(recovered.session.lastSuccessfulRevision).toBe(2);
-    expect(session.getLastSuccessfulBuild()?.modules?.["src/index.js"]).toContain("recovered");
+    expect(recovered.modules?.["src/message.js"]).toContain("failed edit");
+    expect(recovered.session.cache).toMatchObject({
+      transformedModules: ["src/index.js", "src/message.js"],
+      reusedModules: [],
+      droppedModules: [],
+      graphRebuilt: true,
+      packageGraphRebuilt: false,
+    });
+    expect(recovered.session.lastSuccessfulRevision).toBe(3);
+    expect(session.getLastSuccessfulBuild()?.modules?.["src/message.js"]).toContain("failed edit");
   });
 
-  test("tracks virtual module edits", async () => {
+  test("tracks virtual module edits and reuses unchanged virtual JS modules", async () => {
     const session = experimentalCreateDynamicWorkerBuildSession({
       entrypoint: "src/index.tsx",
       files: {
         "src/index.tsx": `
           import { label } from "app/config";
-          export default { async fetch() { return new Response(label) } }
+          import { local } from "./local";
+          export default { async fetch() { return new Response(label + local) } }
         `,
+        "src/local.tsx": `export const local = " local";`,
       },
       virtualModules: {
         "app/config": { js: `export const label = "initial";` },
@@ -138,9 +181,16 @@ describe("experimental Oxc build session", () => {
     expect(second.ok).toBe(true);
     expect(second.session.changedVirtualModules).toEqual(["app/config"]);
     expect(second.modules?.["app/config.js"]).toEqual({ js: expect.stringContaining("changed") });
+
+    session.updateFile("src/local.tsx", `export const local = " updated";`);
+    const third = await session.compile();
+    expect(third.ok).toBe(true);
+    expect(Object.keys(third.modules ?? {}).sort()).toEqual(["app/config.js", "src/index.js", "src/local.js"]);
+    expect(third.session.cache?.reusedModules).toContain("app/config.js");
+    expect(third.modules?.["app/config.js"]).toEqual({ js: expect.stringContaining("changed") });
   });
 
-  test("tracks package file edits", async () => {
+  test("tracks package file edits and package graph cache invalidation", async () => {
     const session = experimentalCreateDynamicWorkerBuildSession({
       entrypoint: "src/index.tsx",
       files: {
@@ -152,18 +202,59 @@ describe("experimental Oxc build session", () => {
       packageFiles: {
         "node_modules/pkg/package.json": JSON.stringify({ name: "pkg", exports: "./index.js" }),
         "node_modules/pkg/index.js": `export const label = "initial";`,
+        "node_modules/other/package.json": JSON.stringify({ name: "other", exports: "./index.js" }),
+        "node_modules/other/index.js": `export const label = "other";`,
       },
     });
 
     const first = await session.compile();
     expect(first.ok).toBe(true);
+    expect(first.session.cache?.packageGraphRebuilt).toBe(true);
     expect(first.modules?.["node_modules/pkg/index.js"]).toEqual({ js: expect.stringContaining("initial") });
 
-    session.setPackageFile("node_modules/pkg/index.js", `export const label = "changed";`);
-    const second = await session.compile();
-    expect(second.ok).toBe(true);
-    expect(second.session.changedPackageFiles).toEqual(["node_modules/pkg/index.js"]);
-    expect(second.modules?.["node_modules/pkg/index.js"]).toEqual({ js: expect.stringContaining("changed") });
+    session.updateFile("src/index.tsx", `
+      import { label } from "pkg";
+      export default { async fetch() { return new Response(label + "!") } }
+    `);
+    const sameImports = await session.compile();
+    expect(sameImports.ok).toBe(true);
+    expect(sameImports.session.cache).toMatchObject({
+      transformedModules: ["src/index.js"],
+      reusedModules: [],
+      droppedModules: [],
+      graphRebuilt: true,
+      packageGraphRebuilt: false,
+    });
+    expect(sameImports.modules?.["node_modules/pkg/index.js"]).toEqual({ js: expect.stringContaining("initial") });
+
+    session.updateFile("src/index.tsx", `
+      import { label } from "other";
+      export default { async fetch() { return new Response(label) } }
+    `);
+    const changedImports = await session.compile();
+    expect(changedImports.ok).toBe(true);
+    expect(changedImports.session.cache).toMatchObject({
+      transformedModules: ["src/index.js"],
+      reusedModules: [],
+      droppedModules: ["node_modules/pkg/index.js"],
+      graphRebuilt: true,
+      packageGraphRebuilt: true,
+    });
+    expect(changedImports.modules?.["node_modules/other/index.js"]).toEqual({ js: expect.stringContaining("other") });
+    expect(changedImports.modules?.["node_modules/pkg/index.js"]).toBeUndefined();
+
+    session.setPackageFile("node_modules/other/index.js", `export const label = "changed";`);
+    const changedPackageFile = await session.compile();
+    expect(changedPackageFile.ok).toBe(true);
+    expect(changedPackageFile.session.changedPackageFiles).toEqual(["node_modules/other/index.js"]);
+    expect(changedPackageFile.session.cache).toMatchObject({
+      transformedModules: [],
+      reusedModules: ["src/index.js"],
+      droppedModules: [],
+      graphRebuilt: true,
+      packageGraphRebuilt: true,
+    });
+    expect(changedPackageFile.modules?.["node_modules/other/index.js"]).toEqual({ js: expect.stringContaining("changed") });
   });
 
   test("returns defensive input and last-successful-build copies", async () => {

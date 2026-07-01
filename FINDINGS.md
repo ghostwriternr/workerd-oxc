@@ -272,18 +272,23 @@ Recommended near-term split:
 
 ## Experimental incremental build sessions
 
-`experimentalCreateDynamicWorkerBuildSession(input)` now exposes a public experimental edit-loop API around the Oxc-first Dynamic Worker builder.
+`experimentalCreateDynamicWorkerBuildSession(input)` exposes a public experimental edit-loop API around the Oxc-first Dynamic Worker builder.
 
-The first implementation proves workflow semantics rather than true compiler-cache internals:
+The session API now proves workflow semantics and a first builder-side transform cache:
 
 - sessions track a monotonically increasing `revision`;
 - `compile()` returns the normal `ReactWorkerBuildOutput` fields plus session metadata for changed/deleted first-party files, virtual modules, and package snapshot files;
+- `compile().session.cache` reports `transformedModules`, `reusedModules`, `droppedModules`, `graphRebuilt`, and `packageGraphRebuilt`;
 - `updateFile()`, `deleteFile()`, `setVirtualModule()`, `deleteVirtualModule()`, `setPackageFile()`, and `deletePackageFile()` mutate a defensive session-owned input copy;
-- failed compiles return current diagnostics without replacing `getLastSuccessfulBuild()`;
+- unchanged transformed local module and virtual JS module outputs are reused when rewritten source, JSX settings, and resolution context are unchanged;
+- package graph output is reused when the package import list and package snapshot are unchanged;
+- failed compiles return current diagnostics without replacing `getLastSuccessfulBuild()` or the last successful cache;
 - recovery after failure updates the last-successful build and revision;
 - `snapshotInput()` and `getLastSuccessfulBuild()` return defensive copies so callers cannot mutate session internals accidentally.
 
-Current limitation: each session `compile()` still delegates to the existing Oxc parser/transform graph path. There is no per-module transform cache, package graph cache, or dependency-aware invalidation yet. Those are the next internal optimization step if the public experimental workflow shape continues to look right.
+Worker Loader constraints still matter: Dynamic Worker definitions are complete `mainModule + modules` maps, and workerd compiles/parses all modules for a newly loaded isolate. Worker Loader caches by ID, and docs require a new ID when code changes. Therefore this cache reduces builder compile latency and repeated Oxc transform work; it does not implement Worker Loader partial updates or eliminate Dynamic Worker startup compilation for a new ID/code pair. To respect the 128 MB isolate memory limit, the session cache stores rewritten source keys and transformed module outputs, not full materialized ASTs by default.
+
+Current limitation: local graph discovery is still rebuilt conservatively each compile. The next optimization step would cache graph scan results and invalidate dependents only when import/export specifiers change.
 
 Evidence:
 
@@ -293,7 +298,8 @@ Evidence:
   - proves failed compiles preserve the last successful build;
   - proves recovery updates last-successful state;
   - proves virtual module and package file edits affect output and metadata;
-  - proves delete/reset/no-op behavior and defensive copies.
+  - proves delete/reset/no-op behavior and defensive copies;
+  - proves cache metadata for transformed, reused, and dropped modules during leaf edits, graph changes, and package snapshot edits.
 
 ## Oxc full AST access in workerd
 
