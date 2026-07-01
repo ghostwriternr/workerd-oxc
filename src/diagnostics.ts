@@ -58,6 +58,24 @@ export function sourceLocationAtOffset(source: string, offset: number): SourceLo
   return { line, column: clampedOffset - lineStart + 1 };
 }
 
+export function sourceOffsetAtLocation(source: string, location: SourceLocation): number {
+  const targetLine = Math.max(1, Math.trunc(location.line));
+  const targetColumn = Math.max(1, Math.trunc(location.column));
+  let line = 1;
+  let lineStart = 0;
+
+  for (let index = 0; index < source.length && line < targetLine; index++) {
+    if (source[index] === "\n") {
+      line += 1;
+      lineStart = index + 1;
+    }
+  }
+
+  const lineEnd = source.indexOf("\n", lineStart);
+  const maxOffset = lineEnd === -1 ? source.length : lineEnd;
+  return Math.min(lineStart + targetColumn - 1, maxOffset);
+}
+
 function sourceSpan(source: string, start: number, end = start): SourceSpan {
   const clampedStart = clampOffset(source, start);
   const clampedEnd = clampOffset(source, end);

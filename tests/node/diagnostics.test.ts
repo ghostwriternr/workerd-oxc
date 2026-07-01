@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { diagnosticAtSourceOffset, sourceLocationAtOffset } from "../../src/diagnostics";
+import { originalPositionFor } from "../../src/source-map";
 
 describe("source-aware diagnostics helpers", () => {
   it("maps offsets to 1-based line and column positions", () => {
@@ -37,5 +38,40 @@ describe("source-aware diagnostics helpers", () => {
 
     expect(sourceLocationAtOffset(source, 3)).toEqual({ line: 2, column: 1 });
     expect(sourceLocationAtOffset(source, source.indexOf("value"))).toEqual({ line: 2, column: 7 });
+  });
+});
+
+describe("source-map helpers", () => {
+  it("maps generated positions to original 1-based source positions", () => {
+    const map = {
+      version: 3,
+      sources: ["input.tsx"],
+      names: [],
+      mappings: "UACG",
+    };
+
+    expect(originalPositionFor(map, { line: 1, column: 1 })).toBeUndefined();
+    expect(originalPositionFor(map, { line: 1, column: 11 })).toEqual({
+      source: "input.tsx",
+      line: 2,
+      column: 4,
+    });
+    expect(originalPositionFor({ ...map, mappings: ";UACG" }, { line: 1, column: 1 })).toBeUndefined();
+  });
+
+  it("returns undefined when the nearest generated segment is unmapped", () => {
+    const map = {
+      version: 3,
+      sources: ["input.tsx"],
+      names: [],
+      mappings: "UACG,K",
+    };
+
+    expect(originalPositionFor(map, { line: 1, column: 11 })).toEqual({
+      source: "input.tsx",
+      line: 2,
+      column: 4,
+    });
+    expect(originalPositionFor(map, { line: 1, column: 16 })).toBeUndefined();
   });
 });

@@ -305,7 +305,10 @@ async function compileWithCache(input: ReactWorkerBuildInput, previousCache: Com
         return failedCompile(diagnostics, events, previousCache, transformedModules, reusedModules, graphScannedModules, graphReusedModules, packageGraphRebuilt);
       }
 
-      const processed = processModuleSpecifiersWithOxc(parser, module.outputPath, code, virtualModules, normalizedPackageFiles);
+      const processed = processModuleSpecifiersWithOxc(parser, module.outputPath, code, virtualModules, normalizedPackageFiles, {
+        map: result.map,
+        originalSources: { [module.inputPath]: module.source }
+      });
       if (!processed.ok) {
         events.push(evidence("oxc-transform", "transform", false, transformStart, `post-transform import validation failed in ${module.outputPath}`));
         diagnostics.push(...processed.diagnostics);

@@ -3,9 +3,10 @@ import { instantiateNapiModule } from "@alexbruf/wasmkernel/worker";
 import wasmkernelModule from "@alexbruf/wasmkernel/wasmkernel.wasm";
 import oxcParserBytes from "../wasm/oxc-parser.wasm.bin";
 import oxcTransformBytes from "../wasm/oxc-transform.wasm.bin";
-import { diagnostic, diagnosticAtSourceOffset, evidence, isProbablyWorkerd } from "../diagnostics";
+import { diagnostic, diagnosticAtSourceOffset, evidence, isProbablyWorkerd, sourceLocationAtOffset, sourceOffsetAtLocation } from "../diagnostics";
 import { buildLocalModuleGraph, type ModuleSpecifier } from "./module-graph";
 import { buildPackageModuleGraph, resolvePackageSpecifier } from "./package-resolver";
+import { originalPositionFor, type DecodedSourceMap } from "../source-map";
 import type {
   DynamicWorkerModuleContent,
   DynamicWorkerVirtualModuleContent,
@@ -59,7 +60,7 @@ export type OxcParser = {
   parseSync?: (filename: string, source: string, options?: unknown) => OxcParseResult;
 };
 
-type OxcTransformResult = { code?: string; errors?: unknown[] };
+type OxcTransformResult = { code?: string; errors?: unknown[]; map?: DecodedSourceMap };
 
 export type OxcTransformer = {
   transform?: (filename: string, source: string, options?: unknown) => OxcTransformResult | Promise<OxcTransformResult>;
@@ -195,7 +196,10 @@ export async function transformEntrypointWithOxc(input: ReactWorkerBuildInput): 
         diagnostics.push(diagnostic("oxc-transform", "transform-failed", `Oxc transform did not produce JavaScript for ${module.inputPath}.`, errors));
         return { ok: false, diagnostics, evidence: events, toolchain: { parser: "oxc-parser", transformer: "oxc-transform", loaderTarget: "none" } };
       }
-      const processed = processModuleSpecifiers(parser, module.outputPath, code, virtualModules, normalizedPackageFiles);
+      const processed = processModuleSpecifiers(parser, module.outputPath, code, virtualModules, normalizedPackageFiles, {
+        map: result.map,
+        originalSources: { [module.inputPath]: module.source }
+      });
       if (!processed.ok) {
         events.push(evidence("oxc-transform", "transform", false, transformStart, `post-transform import validation failed in ${module.outputPath}`));
         diagnostics.push(...processed.diagnostics);
@@ -337,9 +341,15 @@ export function processModuleSpecifiersWithOxc(
   filename: string,
   code: string,
   virtualModules: Record<string, NormalizedVirtualModule>,
-  packageFiles?: Record<string, string>
+  packageFiles?: Record<string, string>,
+  sourceMapContext?: SourceMapContext
 ): { ok: true; code: string; packageImports: string[]; diagnostics: [] } | { ok: false; code: string; packageImports: string[]; diagnostics: ToolchainDiagnostic[] } {
-  return processModuleSpecifiers(parser, filename, code, virtualModules, packageFiles);
+  return processModuleSpecifiers(parser, filename, code, virtualModules, packageFiles, sourceMapContext);
+}
+
+interface SourceMapContext {
+  map?: DecodedSourceMap;
+  originalSources?: Record<string, string>;
 }
 
 function processModuleSpecifiers(
@@ -347,7 +357,8 @@ function processModuleSpecifiers(
   filename: string,
   code: string,
   virtualModules: Record<string, NormalizedVirtualModule>,
-  packageFiles?: Record<string, string>
+  packageFiles?: Record<string, string>,
+  sourceMapContext?: SourceMapContext
 ): { ok: true; code: string; packageImports: string[]; diagnostics: [] } | { ok: false; code: string; packageImports: string[]; diagnostics: ToolchainDiagnostic[] } {
   const diagnostics: ToolchainDiagnostic[] = [];
   const rewrites: Array<{ start: number; end: number; value: string }> = [];
@@ -369,11 +380,13 @@ function processModuleSpecifiers(
     if (specifier.isTypeOnly) continue;
     if (specifier.kind === "dynamic") {
       diagnostics.push(
-        diagnosticAtSourceOffset(
-          "oxc-transform",
-          "transform-failed",
+        postTransformDiagnostic(
           `Dynamic imports are not supported by the local Worker Loader graph spike: ${specifier.specifier ?? code.slice(specifier.start, specifier.end)}`,
-          { source: code, offset: specifier.start, end: specifier.end, file: filename }
+          filename,
+          code,
+          specifier.start,
+          specifier.end,
+          sourceMapContext
         )
       );
       continue;
@@ -405,17 +418,74 @@ function processModuleSpecifiers(
     }
 
     diagnostics.push(
-      diagnosticAtSourceOffset(
-        "oxc-transform",
-        "transform-failed",
+      postTransformDiagnostic(
         `Bare import specifiers are not supported by the local Worker Loader graph spike: ${rawSpecifier}`,
-        { source: code, offset: specifier.start, end: specifier.end, file: filename }
+        filename,
+        code,
+        specifier.start,
+        specifier.end,
+        sourceMapContext
       )
     );
   }
 
   if (diagnostics.length > 0) return { ok: false, code, packageImports: Array.from(packageImports), diagnostics };
   return { ok: true, code: applyRewrites(code, rewrites), packageImports: Array.from(packageImports), diagnostics: [] };
+}
+
+function postTransformDiagnostic(
+  message: string,
+  filename: string,
+  generatedCode: string,
+  start: number,
+  end: number,
+  sourceMapContext?: SourceMapContext
+): ToolchainDiagnostic {
+  const generatedDiagnostic = diagnosticAtSourceOffset("oxc-transform", "transform-failed", message, {
+    source: generatedCode,
+    offset: start,
+    end,
+    file: filename
+  });
+
+  if (sourceMapContext?.map === undefined || generatedDiagnostic.line === undefined || generatedDiagnostic.column === undefined) {
+    return generatedDiagnostic;
+  }
+
+  const originalStart = originalPositionFor(sourceMapContext.map, {
+    line: generatedDiagnostic.line,
+    column: generatedDiagnostic.column
+  });
+
+  if (originalStart === undefined) return generatedDiagnostic;
+
+  const generatedEnd = sourceLocationAtOffset(generatedCode, end);
+  const originalEnd = originalPositionFor(sourceMapContext.map, generatedEnd);
+  const originalSource = originalSourceFor(sourceMapContext, originalStart.source);
+  const originalStartOffset = originalSource
+    ? sourceOffsetAtLocation(originalSource, { line: originalStart.line, column: originalStart.column })
+    : undefined;
+  const originalEndOffset = originalSource && originalEnd?.source === originalStart.source
+    ? sourceOffsetAtLocation(originalSource, { line: originalEnd.line, column: originalEnd.column })
+    : undefined;
+
+  return {
+    ...generatedDiagnostic,
+    file: originalStart.source,
+    line: originalStart.line,
+    column: originalStart.column,
+    span: originalStartOffset === undefined || originalEndOffset === undefined
+      ? undefined
+      : originalStartOffset <= originalEndOffset
+        ? { start: originalStartOffset, end: originalEndOffset }
+        : { start: originalEndOffset, end: originalStartOffset }
+  };
+}
+
+function originalSourceFor(context: SourceMapContext, source: string): string | undefined {
+  if (context.originalSources?.[source] !== undefined) return context.originalSources[source];
+  const sourceIndex = context.map?.sources.indexOf(source) ?? -1;
+  return sourceIndex === -1 ? undefined : context.map?.sourcesContent?.[sourceIndex];
 }
 
 function applyRewrites(code: string, rewrites: Array<{ start: number; end: number; value: string }>): string {
@@ -709,7 +779,8 @@ function transformOptions(filename: string, input: ReactWorkerBuildInput) {
     sourceType: "module",
     typescript: {},
     jsx: jsxOptions(input),
-    target: "es2022"
+    target: "es2022",
+    sourcemap: true
   };
 }
 

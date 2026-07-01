@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { checkReactTsx, compileDynamicWorker, compileTsx, loadDynamicWorker, TSX_COMPONENT_FIXTURE } from "../../../src/index";
+import { getOxcTransformerForRuntime, transformOptionsForOxc } from "../../../src/oxc/transform";
 import type { WorkerLoaderBinding } from "../../../src/types";
 
 interface Env {
@@ -52,6 +53,27 @@ describe("Oxc parser/transform through wasmkernel in workerd", () => {
         ok: false
       })
     );
+  });
+
+  it("returns Oxc transform source maps through wasmkernel", async () => {
+    const transformer = await getOxcTransformerForRuntime();
+    const source = `const view = <span>{"mapped"}</span>;\nexport default view;\n`;
+    const result = transformer.transformSync?.(
+      "src/control.tsx",
+      source,
+      transformOptionsForOxc("src/control.tsx", {
+        entrypoint: "src/control.tsx",
+        files: { "src/control.tsx": source },
+      })
+    );
+
+    expect(result?.code).toContain("react/jsx-runtime");
+    expect(result?.code).not.toContain("sourceMappingURL");
+    expect(result?.map).toMatchObject({
+      version: 3,
+      sources: expect.arrayContaining(["src/control.tsx"]),
+      mappings: expect.any(String),
+    });
   });
 
   it("transforms a local relative TSX module graph into Dynamic Worker modules", async () => {
@@ -347,6 +369,7 @@ export const Fragment = Symbol.for("react.fragment");
     expect(build.mainModule).toBe("src/index.js");
     expect(Object.keys(build.modules ?? {}).sort()).toEqual(["react/jsx-runtime.js", "src/index.js"]);
     expect(build.modules?.["src/index.js"]).toContain("from \"/react/jsx-runtime.js\"");
+    expect(build.modules?.["src/index.js"]).not.toContain("sourceMappingURL");
     expect(JSON.stringify(build.modules?.["react/jsx-runtime.js"])).toContain("function jsx");
 
     const worker = loadDynamicWorker(workerEnv.LOADER, `oxc-virtual-jsx-${id++}`, build, {
@@ -407,7 +430,7 @@ export default { fetch() { return new Response(view.props.children); } };
         kind: "transform-failed",
         message: expect.stringContaining("Bare import specifiers are not supported"),
         file: "src/index.js",
-        line: expect.any(Number),
+        line: 1,
         column: expect.any(Number),
         span: expect.objectContaining({
           start: expect.any(Number),
