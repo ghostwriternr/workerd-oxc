@@ -16,6 +16,7 @@
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:operational": "vitest run --config vitest.workers.config.ts tests/workers/experiments/swc-operational.test.ts tests/workers/oxc/compile-stress.test.ts",
     "test:bundle-shape": "vitest run --config vitest.config.ts tests/node/wrangler-bundle-shape.test.ts",
+    "test:startup": "vitest run --config vitest.config.ts tests/node/wrangler-bundle-shape.test.ts && vitest run --config vitest.workers.config.ts tests/workers/measurements/oxc-operational-measurements.test.ts",
     "test:risk": "vitest run --config vitest.config.ts tests/node/toolchain-footprint.test.ts tests/node/wrangler-bundle-shape.test.ts && vitest run --config vitest.workers.config.ts tests/workers/measurements/toolchain-memory-risk.test.ts",
     "typecheck": "tsc --noEmit"
   },

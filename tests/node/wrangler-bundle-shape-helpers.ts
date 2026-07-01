@@ -24,6 +24,10 @@ export interface WranglerBundleShape {
   metafileOutputBytes: number;
   wranglerUploadBytes: number;
   wranglerUploadGzipBytes: number;
+  startupOk: boolean;
+  startupCommand: string[];
+  startupStdout: string;
+  startupStderr: string;
   command: string[];
   stdout: string;
   stderr: string;
@@ -33,6 +37,7 @@ export async function measureWranglerBundleShape(caseName: string, entrypoint: s
   const outdir = join(OUTPUT_ROOT, caseName, "out");
   const configPath = join(OUTPUT_ROOT, caseName, "wrangler.jsonc");
   const metafilePath = join(outdir, "bundle-meta.json");
+  const startupProfilePath = join(OUTPUT_ROOT, caseName, "worker-startup.cpuprofile");
   await rm(join(OUTPUT_ROOT, caseName), { recursive: true, force: true });
   await mkdir(outdir, { recursive: true });
   await writeFile(configPath, JSON.stringify(wranglerConfig(caseName, entrypoint, dirname(configPath)), null, 2));
@@ -70,6 +75,7 @@ export async function measureWranglerBundleShape(caseName: string, entrypoint: s
   const totalBytes = files.reduce((sum, file) => sum + file.bytes, 0);
   const { metafileInputBytes, metafileOutputBytes } = await readMetafileTotals(metafilePath);
   const { wranglerUploadBytes, wranglerUploadGzipBytes } = parseWranglerUploadSizes(`${stdout}\n${stderr}`);
+  const startup = await runWranglerStartupCheck(configPath, startupProfilePath);
 
   return {
     ok,
@@ -83,10 +89,50 @@ export async function measureWranglerBundleShape(caseName: string, entrypoint: s
     metafileOutputBytes,
     wranglerUploadBytes,
     wranglerUploadGzipBytes,
+    startupOk: startup.ok,
+    startupCommand: startup.command,
+    startupStdout: startup.stdout,
+    startupStderr: startup.stderr,
     command: ["npx", ...command],
     stdout,
     stderr
   };
+}
+
+async function runWranglerStartupCheck(
+  configPath: string,
+  startupProfilePath: string,
+): Promise<{ ok: boolean; command: string[]; stdout: string; stderr: string }> {
+  const command = [
+    "wrangler",
+    "check",
+    "startup",
+    "--config",
+    relative(ROOT, configPath),
+    "--outfile",
+    relative(ROOT, startupProfilePath)
+  ];
+
+  try {
+    const result = await execFileAsync("npx", command, {
+      cwd: ROOT,
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env, NO_COLOR: "1" }
+    });
+    return {
+      ok: true,
+      command: ["npx", ...command],
+      stdout: result.stdout,
+      stderr: result.stderr
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      command: ["npx", ...command],
+      stdout: typeof error === "object" && error !== null && "stdout" in error ? String(error.stdout) : "",
+      stderr: typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : String(error)
+    };
+  }
 }
 
 function wranglerConfig(caseName: string, entrypoint: string, configDirectory: string): Record<string, unknown> {

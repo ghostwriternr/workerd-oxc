@@ -4,7 +4,9 @@ import { measureWranglerBundleShape } from "./wrangler-bundle-shape-helpers";
 const CASES = [
   { caseName: "babel", entrypoint: "tests/bundle-shape/entries/babel.ts" },
   { caseName: "swc", entrypoint: "tests/bundle-shape/entries/swc.ts" },
-  { caseName: "oxc", entrypoint: "tests/bundle-shape/entries/oxc.ts" }
+  { caseName: "oxc", entrypoint: "tests/bundle-shape/entries/oxc.ts" },
+  { caseName: "oxc-ast", entrypoint: "tests/bundle-shape/entries/oxc-ast.ts" },
+  { caseName: "oxc-transform", entrypoint: "tests/bundle-shape/entries/oxc-transform.ts" }
 ] as const;
 
 function assertFiniteNonNegative(value: number): void {
@@ -12,8 +14,8 @@ function assertFiniteNonNegative(value: number): void {
   expect(value).toBeGreaterThanOrEqual(0);
 }
 
-describe("Wrangler dry-run bundle shape", () => {
-  it("records deployable bundle output for Babel, SWC, and Oxc fixtures", async () => {
+describe("Wrangler dry-run bundle and startup-check shape", () => {
+  it("records deployable bundle output and startup-check signals for Babel, SWC, and Oxc fixtures", async () => {
     const results = [];
     for (const entry of CASES) {
       results.push(await measureWranglerBundleShape(entry.caseName, entry.entrypoint));
@@ -27,6 +29,9 @@ describe("Wrangler dry-run bundle shape", () => {
       assertFiniteNonNegative(result.metafileOutputBytes);
       expect(result.wranglerUploadBytes).toBeGreaterThan(0);
       expect(result.wranglerUploadGzipBytes).toBeGreaterThan(0);
+      expect(typeof result.startupOk).toBe("boolean");
+      expect(result.startupCommand.length).toBeGreaterThan(0);
+      expect(`${result.startupStdout}\n${result.startupStderr}`.length).toBeGreaterThan(0);
       for (const file of result.files) assertFiniteNonNegative(file.bytes);
     }
 

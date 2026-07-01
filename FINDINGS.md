@@ -148,27 +148,44 @@ Artifact-level interpretation:
 - `@swc/wasm-web/wasm_bg.wasm` is roughly 19.3 MB raw / 5.0 MB gzip in this install. That is the main SWC operational risk despite promising transform timings.
 - The current Oxc path uses three Wasm-related artifacts in this spike: `oxc-parser.wasm.bin`, `oxc-transform.wasm.bin`, and `wasmkernel.wasm`, totaling roughly 5.4 MB raw / 1.7 MB gzip. That excludes JavaScript glue and any deployment bundler overhead.
 
-`tests/node/wrangler-bundle-shape.test.ts` goes one step closer to deployable shape by running `wrangler deploy --dry-run --outdir --metafile` for tiny fixture Workers that import each path. One local Wrangler 4.105.0 dry-run reported:
+`tests/node/wrangler-bundle-shape.test.ts` goes one step closer to deployable shape by running `wrangler deploy --dry-run --outdir --metafile` for tiny fixture Workers that import each path. It also runs `wrangler check startup` as an alpha-command startup signal. One local Wrangler 4.105.0 dry-run reported:
 
 ```json
 {
   "babel": {
     "wranglerUploadBytes": 502139,
     "wranglerUploadGzipBytes": 99092,
-    "metafileInputBytes": 494308,
-    "metafileOutputBytes": 1605075
+    "metafileInputBytes": 494302,
+    "metafileOutputBytes": 1605072,
+    "startupOk": false
   },
   "swc": {
-    "wranglerUploadBytes": 19313654,
+    "wranglerUploadBytes": 19313664,
     "wranglerUploadGzipBytes": 5049201,
-    "metafileInputBytes": 33427,
-    "metafileOutputBytes": 81800
+    "metafileInputBytes": 33429,
+    "metafileOutputBytes": 81806,
+    "startupOk": false
   },
   "oxc": {
-    "wranglerUploadBytes": 5615380,
+    "wranglerUploadBytes": 5615370,
     "wranglerUploadGzipBytes": 1766298,
-    "metafileInputBytes": 7321019,
-    "metafileOutputBytes": 548462
+    "metafileInputBytes": 278471,
+    "metafileOutputBytes": 547805,
+    "startupOk": false
+  },
+  "oxc-ast": {
+    "wranglerUploadBytes": 2254561,
+    "wranglerUploadGzipBytes": 678461,
+    "metafileInputBytes": 228606,
+    "metafileOutputBytes": 514358,
+    "startupOk": false
+  },
+  "oxc-transform": {
+    "wranglerUploadBytes": 5655153,
+    "wranglerUploadGzipBytes": 1772913,
+    "metafileInputBytes": 278462,
+    "metafileOutputBytes": 625444,
+    "startupOk": false
   }
 }
 ```
@@ -178,8 +195,45 @@ Wrangler bundle-shape interpretation:
 - Babel-only upload shape tracks the parser JS artifact closely: roughly 0.50 MB upload / 0.10 MB gzip for the tiny fixture.
 - SWC upload shape is dominated by `@swc/wasm-web/wasm_bg.wasm`: roughly 19.3 MB upload / 5.0 MB gzip. The esbuild metafile output byte count is small because the Wasm module is not represented as ordinary bundled JS output.
 - Oxc/wasmkernel upload shape is roughly 5.6 MB upload / 1.8 MB gzip for a tiny `checkReactTsx()` fixture. That includes the vendored Oxc guest bytes and wasmkernel path, plus JavaScript glue.
+- The narrower Oxc AST fixture uploads at roughly 2.25 MB / 0.68 MB gzip because it imports the parser/materializer path without the transform wrapper.
+- The Oxc transform fixture uploads at roughly 5.66 MB / 1.77 MB gzip, close to the broader Oxc fixture because it needs the transform guest bytes and wasmkernel path.
 - Wrangler dry-run `outdir` contained metadata/README files in this run; the useful deployable-size signal came from Wrangler's `Total Upload` line and the esbuild metafile.
-- These dry-run numbers are still not production cold-start, memory/RSS, or full application bundle measurements.
+- `wrangler check startup` is currently an alpha command and returned `startupOk: false` for these generated fixture configs after building the Worker, with `Unexpected external import of "node:async_hooks"` from `hybrid-nodejs_compat`. Treat this as a tooling/startup-check limitation to revisit, not as proof the dry-run-deployable fixtures cannot start.
+- These dry-run and startup-check numbers are still not production cold-start, memory/RSS, or full application bundle measurements.
+
+### Oxc startup and operational measurement signals
+
+`npm run test:startup` records local measurement signals for tiny Oxc AST and Oxc transform fixture Workers plus repeated Oxc AST/compile operations inside workerd. These measurements are local Vitest/Wrangler signals, not production benchmarks.
+
+One local run on 2026-07-01 reported these workerd/Vitest timings:
+
+```json
+{
+  "oxcAst": {
+    "count": 3,
+    "firstMs": 100,
+    "warmAvgMs": 0.5,
+    "minMs": 0,
+    "maxMs": 100,
+    "rawProgramLength": 2676
+  },
+  "oxcCompile10Modules": {
+    "count": 3,
+    "firstMs": 262,
+    "warmAvgMs": 34,
+    "minMs": 34,
+    "maxMs": 262,
+    "emittedModuleCount": 11
+  }
+}
+```
+
+Operational interpretation:
+
+- First observed Oxc AST materialization and `compileDynamicWorker()` calls include wasmkernel/Oxc guest initialization costs in the local test isolate.
+- Warm Oxc AST materialization is effectively sub-millisecond in this small fixture; warm 10-module compile is tens of milliseconds locally.
+- The parse-failure recovery test proves a malformed TSX parse does not poison later Oxc AST materialization in the same local isolate.
+- Current decision: Oxc remains the primary path if startup/bundle-shape numbers stay acceptable for the intended deployment shape; use these tests as regression signals before adding incremental editing or broader resolver features.
 
 `tests/workers/measurements/toolchain-memory-risk.test.ts` records what memory APIs are visible in local workerd/Vitest and exercises repeated larger-input operations through Babel, SWC, and Oxc. One local run reported:
 

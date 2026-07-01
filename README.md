@@ -151,6 +151,7 @@ npm run test:node
 npm run test:workers
 npm run test:operational
 npm run test:bundle-shape
+npm run test:startup
 npm run test:risk
 ```
 
@@ -177,8 +178,9 @@ The tests prove:
 - actual React 19.2.7 / React DOM 19.2.7 CJS production package files can server-render through Worker Loader without bundling both as a manual `{ cjs }` control map and as resolver-produced output from an exact in-memory `packageFiles` snapshot; the constrained resolver selects the `workerd` server export and rewrites literal `require("react")` / `require("react-dom")` calls to explicit Worker Loader module specifiers;
 - 10-module and 50-module local graph stress cases compile successfully in workerd, with timing output available from the stress test;
 - `npm run test:operational` records local workerd/Vitest timing signals for SWC source transforms, SWC transform-from-AST, parse-error recovery, and the current Oxc compile stress path; these are not production benchmarks;
-- `npm run test:bundle-shape` runs Wrangler dry-run builds for tiny Babel, SWC, and Oxc fixture Workers and records Wrangler-reported upload/gzip sizes;
-- `npm run test:risk` records raw/gzip artifact-size proxies, Wrangler dry-run bundle-shape signals, and local workerd memory-observability signals; raw package artifact sizes and dry-run upload sizes are not production cold-start or RSS measurements, and local `process.memoryUsage()` currently reports zero-valued fields rather than meaningful RSS;
+- `npm run test:bundle-shape` runs Wrangler dry-run builds for tiny Babel, SWC, Oxc check, Oxc AST, and Oxc transform fixture Workers and records Wrangler-reported upload/gzip sizes plus `wrangler check startup` alpha-command signals;
+- `npm run test:startup` runs the bundle/startup-shape checks plus Oxc-specific Workers timing probes for full AST materialization, repeated 10-module compiles, and parse-failure recovery;
+- `npm run test:risk` records raw/gzip artifact-size proxies, Wrangler dry-run bundle/startup-shape signals, and local workerd memory-observability signals; raw package artifact sizes and dry-run upload sizes are not production cold-start or RSS measurements, and local `process.memoryUsage()` currently reports zero-valued fields rather than meaningful RSS;
 - missing local imports and unsupported bare imports return structured diagnostics, not crashes;
 - Oxc runtime failures are structured diagnostics, not crashes; Rolldown blocked-runtime behavior remains covered as experiment evidence rather than the active compile path;
 - failed compiler output cannot be accidentally passed to Worker Loader;
