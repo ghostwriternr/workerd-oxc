@@ -118,6 +118,7 @@ function toCompileDiagnostic(d: ToolchainDiagnostic): CompileDiagnostic {
     message: d.cause ? `${d.message} (${d.cause})` : d.message,
     file: d.file,
     line: d.line,
-    column: d.column
+    column: d.column,
+    span: d.span ? { ...d.span } : undefined
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
-import { checkReactTsx, compileDynamicWorker, loadDynamicWorker, TSX_COMPONENT_FIXTURE } from "../../../src/index";
+import { checkReactTsx, compileDynamicWorker, compileTsx, loadDynamicWorker, TSX_COMPONENT_FIXTURE } from "../../../src/index";
 import type { WorkerLoaderBinding } from "../../../src/types";
 
 interface Env {
@@ -207,11 +207,15 @@ export default { fetch() { return new Response(globalThis.prefix + message); } }
     expect(await response.text()).toBe("side effect: exported");
   });
 
-  it("returns diagnostics for dynamic imports", async () => {
+  it("returns source locations for dynamic import diagnostics", async () => {
     const build = await compileDynamicWorker({
       entrypoint: "src/index.ts",
       files: {
-        "src/index.ts": `export default { async fetch() { return new Response(String(await import("./message"))); } };
+        "src/index.ts": `export default {
+  async fetch() {
+    return new Response(String(await import("./message")));
+  }
+};
 `,
         "src/message.ts": `export const message = "dynamic";
 `
@@ -223,16 +227,21 @@ export default { fetch() { return new Response(globalThis.prefix + message); } }
       expect.objectContaining({
         tool: "oxc-transform",
         kind: "transform-failed",
-        message: expect.stringContaining("Dynamic imports are not supported")
+        message: expect.stringContaining("Dynamic imports are not supported"),
+        file: "src/index.ts",
+        line: 3,
+        column: 45,
+        span: { start: 79, end: 90 }
       })
     );
   });
 
-  it("returns diagnostics for missing local relative imports", async () => {
+  it("returns source locations for missing local relative imports", async () => {
     const build = await compileDynamicWorker({
       entrypoint: "src/index.ts",
       files: {
-        "src/index.ts": `import { message } from "./missing";
+        "src/index.ts": `const ok = true;
+import { message } from "./missing";
 export default { fetch() { return new Response(message); } };
 `
       }
@@ -243,7 +252,11 @@ export default { fetch() { return new Response(message); } };
       expect.objectContaining({
         tool: "oxc-transform",
         kind: "transform-failed",
-        message: expect.stringContaining("Could not resolve ./missing imported by src/index.ts")
+        message: expect.stringContaining("Could not resolve ./missing imported by src/index.ts"),
+        file: "src/index.ts",
+        line: 2,
+        column: 25,
+        span: { start: 41, end: 52 }
       })
     );
   });
@@ -377,7 +390,7 @@ export const Fragment = Symbol.for("react.fragment");
     expect(await response.text()).toBe("hello from package jsx");
   });
 
-  it("returns diagnostics for transform-generated bare imports without virtual modules", async () => {
+  it("returns generated source locations for transform-generated bare imports without virtual modules", async () => {
     const build = await compileDynamicWorker({
       entrypoint: "src/index.tsx",
       files: {
@@ -392,7 +405,14 @@ export default { fetch() { return new Response(view.props.children); } };
       expect.objectContaining({
         tool: "oxc-transform",
         kind: "transform-failed",
-        message: expect.stringContaining("Bare import specifiers are not supported")
+        message: expect.stringContaining("Bare import specifiers are not supported"),
+        file: "src/index.js",
+        line: expect.any(Number),
+        column: expect.any(Number),
+        span: expect.objectContaining({
+          start: expect.any(Number),
+          end: expect.any(Number)
+        })
       })
     );
   });
@@ -439,6 +459,30 @@ export default { fetch() { return new Response(String(jsx)); } };
         tool: "oxc-transform",
         kind: "transform-failed",
         message: expect.stringContaining("Bare import specifiers are not supported")
+      })
+    );
+  });
+
+  it("preserves source spans through the compileTsx compatibility diagnostics", async () => {
+    const result = await compileTsx({
+      entry: "src/index.ts",
+      files: {
+        "src/index.ts": `const ok = true;
+import { message } from "./missing";
+export default { fetch() { return new Response(message); } };
+`
+      }
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        source: "oxc",
+        severity: "error",
+        message: expect.stringContaining("Could not resolve ./missing imported by src/index.ts"),
+        file: "src/index.ts",
+        line: 2,
+        column: 25,
+        span: { start: 41, end: 52 }
       })
     );
   });

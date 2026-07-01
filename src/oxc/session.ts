@@ -492,7 +492,7 @@ function cloneBuildOutput(output: ReactWorkerBuildOutput): ReactWorkerBuildOutpu
     modules: output.modules
       ? Object.fromEntries(Object.entries(output.modules).map(([path, content]) => [path, cloneModuleContent(content)]))
       : undefined,
-    diagnostics: output.diagnostics.map((item) => ({ ...item })),
+    diagnostics: output.diagnostics.map((item) => ({ ...item, span: item.span ? { ...item.span } : undefined })),
     evidence: output.evidence.map((item) => ({ ...item })),
     toolchain: { ...output.toolchain }
   };

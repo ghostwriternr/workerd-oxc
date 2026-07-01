@@ -22,6 +22,11 @@ export type DiagnosticKind =
   | "not-applicable"
   | "warning";
 
+export interface SourceSpan {
+  start: number;
+  end: number;
+}
+
 export interface ToolchainDiagnostic {
   tool: ToolName;
   kind: DiagnosticKind;
@@ -30,6 +35,7 @@ export interface ToolchainDiagnostic {
   file?: string;
   line?: number;
   column?: number;
+  span?: SourceSpan;
   cause?: string;
 }
 
@@ -171,6 +177,7 @@ export interface CompileDiagnostic {
   file?: string;
   line?: number;
   column?: number;
+  span?: SourceSpan;
 }
 
 export interface CompileOutput {

@@ -141,9 +141,23 @@ describe("experimental Oxc build session", () => {
     expect(lastGood?.modules?.["src/message.js"]).toContain("good");
 
     session.updateFile("src/message.tsx", `export const message = "failed edit";`);
-    session.updateFile("src/index.tsx", `import { message } from "./message"; import "./missing"; export default { async fetch() { return new Response(message) } }`);
+    session.updateFile("src/index.tsx", `import { message } from "./message";
+import "./missing";
+export default { async fetch() { return new Response(message) } }
+`);
     const failed = await session.compile();
     expect(failed.ok).toBe(false);
+    expect(failed.diagnostics).toContainEqual(
+      expect.objectContaining({
+        tool: "oxc-transform",
+        kind: "transform-failed",
+        message: expect.stringContaining("Could not resolve ./missing imported by src/index.tsx"),
+        file: "src/index.tsx",
+        line: 2,
+        column: 8,
+        span: { start: 44, end: 55 }
+      })
+    );
     expect(failed.session.changedFiles).toEqual(["src/index.tsx", "src/message.tsx"]);
     expect(failed.session.cache?.transformedModules).toEqual([]);
     expect(failed.session.cache?.graphScannedModules).toEqual(["src/index.tsx", "src/message.tsx"]);

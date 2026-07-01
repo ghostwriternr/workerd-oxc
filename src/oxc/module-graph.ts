@@ -1,4 +1,4 @@
-import { diagnostic } from "../diagnostics";
+import { diagnostic, diagnosticAtSourceOffset } from "../diagnostics";
 import type { DynamicWorkerVirtualModuleContent, ReactWorkerBuildInput, ToolchainDiagnostic } from "../types";
 import { packageSpecifierDiagnostic, resolvePackageSpecifier } from "./package-resolver";
 
@@ -82,10 +82,11 @@ export async function buildLocalModuleGraph(
 
       if (specifier.kind === "dynamic") {
         diagnostics.push(
-          diagnostic(
+          diagnosticAtSourceOffset(
             "oxc-transform",
             "transform-failed",
-            `Dynamic imports are not supported by the local Worker Loader graph spike: ${specifier.specifier ?? source.slice(specifier.start, specifier.end)}`
+            `Dynamic imports are not supported by the local Worker Loader graph spike: ${specifier.specifier ?? source.slice(specifier.start, specifier.end)}`,
+            { source, offset: specifier.start, end: specifier.end, file: inputPath }
           )
         );
         continue;
@@ -93,7 +94,14 @@ export async function buildLocalModuleGraph(
 
       const rawSpecifier = specifier.specifier;
       if (rawSpecifier === undefined) {
-        diagnostics.push(diagnostic("oxc-transform", "transform-failed", `Could not read import specifier in ${inputPath}.`));
+        diagnostics.push(
+          diagnosticAtSourceOffset(
+            "oxc-transform",
+            "transform-failed",
+            `Could not read import specifier in ${inputPath}.`,
+            { source, offset: specifier.start, end: specifier.end, file: inputPath }
+          )
+        );
         continue;
       }
 
@@ -120,14 +128,22 @@ export async function buildLocalModuleGraph(
         }
         const packageDiagnostic = input.packageFiles ? packageSpecifierDiagnostic(rawSpecifier, input.packageFiles) : undefined;
         if (packageDiagnostic !== undefined) {
-          diagnostics.push(packageDiagnostic);
+          diagnostics.push(
+            diagnosticAtSourceOffset(
+              packageDiagnostic.tool,
+              packageDiagnostic.kind,
+              packageDiagnostic.message,
+              { source, offset: specifier.start, end: specifier.end, file: inputPath, cause: packageDiagnostic.cause }
+            )
+          );
           continue;
         }
         diagnostics.push(
-          diagnostic(
+          diagnosticAtSourceOffset(
             "oxc-transform",
             "transform-failed",
-            `Bare import specifiers are not supported by the local Worker Loader graph spike: ${rawSpecifier}`
+            `Bare import specifiers are not supported by the local Worker Loader graph spike: ${rawSpecifier}`,
+            { source, offset: specifier.start, end: specifier.end, file: inputPath }
           )
         );
         continue;
@@ -136,10 +152,11 @@ export async function buildLocalModuleGraph(
       const resolved = resolveRelativeModule(inputPath, rawSpecifier, files);
       if (resolved === undefined) {
         diagnostics.push(
-          diagnostic(
+          diagnosticAtSourceOffset(
             "oxc-transform",
             "transform-failed",
-            `Could not resolve ${rawSpecifier} imported by ${inputPath}.`
+            `Could not resolve ${rawSpecifier} imported by ${inputPath}.`,
+            { source, offset: specifier.start, end: specifier.end, file: inputPath }
           )
         );
         continue;

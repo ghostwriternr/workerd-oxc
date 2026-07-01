@@ -75,7 +75,7 @@ Current active path:
 
 The Oxc transform path uses the Oxc parser during graph discovery, resolves local relative files from `input.files`, accepts caller-provided `virtualModules` as exact bare-module keys (`string | { js } | { json } | { text } | { data } | { wasm }`), rewrites specifiers to emitted Worker Loader module keys, transforms each reachable source file, and returns a Worker Loader module map. JS virtual modules may import other virtual modules. Non-JS virtual object modules are emitted as leaf Worker Loader object modules; the builder does not scan or transform them. Type-only imports/exports are ignored for runtime graph purposes. Runtime external specifiers such as `cloudflare:*` are left unchanged. Bare/npm imports are resolved only when they are exact caller-provided `virtualModules` or when they are present in a constrained in-memory `packageFiles` snapshot. The package resolver handles package export targets with a small condition list (`workerd`, `worker`, `browser`, `import`, `require`, `default`), rewrites static ESM imports and literal CJS `require()` calls to explicit Worker Loader specifiers, emits package JS/CJS files under `node_modules/<package>/...` keys, and rejects unsupported shapes with diagnostics. Post-transform import rewriting is parser-driven so ordinary string literals are not changed.
 
-Failures are returned as structured diagnostics because the failures are the evidence.
+Failures are returned as structured diagnostics because the failures are the evidence. Common graph/import failures now include source-aware `file`, 1-based `line`, 1-based `column`, and `span: { start, end }` fields. Local graph diagnostics point to the original caller source; post-transform validation diagnostics point to the emitted module source for now. Full source maps and runtime stack mapping remain future work.
 
 ### `checkReactTsx(source | input)`
 
@@ -229,7 +229,7 @@ The tests prove:
 - `npm run test:bundle-shape` runs Wrangler dry-run builds for tiny Babel, SWC, Oxc check, Oxc AST, and Oxc transform fixture Workers and records Wrangler-reported upload/gzip sizes plus `wrangler check startup` alpha-command signals;
 - `npm run test:startup` runs the bundle/startup-shape checks plus Oxc-specific Workers timing probes for full AST materialization, repeated 10-module compiles, and parse-failure recovery;
 - `npm run test:risk` records raw/gzip artifact-size proxies, Wrangler dry-run bundle/startup-shape signals, and local workerd memory-observability signals; raw package artifact sizes and dry-run upload sizes are not production cold-start or RSS measurements, and local `process.memoryUsage()` currently reports zero-valued fields rather than meaningful RSS;
-- missing local imports and unsupported bare imports return structured diagnostics, not crashes;
+- missing local imports, unsupported dynamic imports, and unsupported bare imports return structured diagnostics with source locations where the builder has parser offsets, not crashes;
 - Oxc runtime failures are structured diagnostics, not crashes; Rolldown blocked-runtime behavior remains covered as experiment evidence rather than the active compile path;
 - failed compiler output cannot be accidentally passed to Worker Loader or hashed into a Dynamic Worker build ID;
 - Vite, rolldown-vite, Oxlint, and Oxfmt are classified as development/build/CLI tooling rather than workerd runtime builder APIs.

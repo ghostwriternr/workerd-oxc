@@ -3,7 +3,7 @@ import { instantiateNapiModule } from "@alexbruf/wasmkernel/worker";
 import wasmkernelModule from "@alexbruf/wasmkernel/wasmkernel.wasm";
 import oxcParserBytes from "../wasm/oxc-parser.wasm.bin";
 import oxcTransformBytes from "../wasm/oxc-transform.wasm.bin";
-import { diagnostic, evidence, isProbablyWorkerd } from "../diagnostics";
+import { diagnostic, diagnosticAtSourceOffset, evidence, isProbablyWorkerd } from "../diagnostics";
 import { buildLocalModuleGraph, type ModuleSpecifier } from "./module-graph";
 import { buildPackageModuleGraph, resolvePackageSpecifier } from "./package-resolver";
 import type {
@@ -368,7 +368,14 @@ function processModuleSpecifiers(
   for (const specifier of specifiers) {
     if (specifier.isTypeOnly) continue;
     if (specifier.kind === "dynamic") {
-      diagnostics.push(diagnostic("oxc-transform", "transform-failed", `Dynamic imports are not supported by the local Worker Loader graph spike: ${specifier.specifier ?? code.slice(specifier.start, specifier.end)}`));
+      diagnostics.push(
+        diagnosticAtSourceOffset(
+          "oxc-transform",
+          "transform-failed",
+          `Dynamic imports are not supported by the local Worker Loader graph spike: ${specifier.specifier ?? code.slice(specifier.start, specifier.end)}`,
+          { source: code, offset: specifier.start, end: specifier.end, file: filename }
+        )
+      );
       continue;
     }
 
@@ -397,7 +404,14 @@ function processModuleSpecifiers(
       continue;
     }
 
-    diagnostics.push(diagnostic("oxc-transform", "transform-failed", `Bare import specifiers are not supported by the local Worker Loader graph spike: ${rawSpecifier}`));
+    diagnostics.push(
+      diagnosticAtSourceOffset(
+        "oxc-transform",
+        "transform-failed",
+        `Bare import specifiers are not supported by the local Worker Loader graph spike: ${rawSpecifier}`,
+        { source: code, offset: specifier.start, end: specifier.end, file: filename }
+      )
+    );
   }
 
   if (diagnostics.length > 0) return { ok: false, code, packageImports: Array.from(packageImports), diagnostics };
