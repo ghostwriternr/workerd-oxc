@@ -7,6 +7,7 @@ describe("public package shape", () => {
     expect(Object.keys(pkg).sort()).toEqual([
       "compileDynamicWorkerModules",
       "dynamicWorkerBuildId",
+      "experimentalParseReactTsxAstDirect",
       "hashDynamicWorkerBuild",
       "loadDynamicWorker",
       "parseReactTsxAst",

@@ -8,6 +8,7 @@ The package is intended to be complete at a narrow layer:
 
 - initialize Oxc parser/transform inside Cloudflare workerd;
 - materialize full TS/TSX Oxc ASTs safely;
+- prove a parser-first direct Oxc Wasm ABI that avoids N-API/wasmkernel for parsing;
 - transform one TS/TSX/JSX module at a time;
 - compile explicit caller-supplied module maps into Worker Loader definitions;
 - provide Dynamic Worker build IDs and Worker Loader helper functions.
@@ -15,6 +16,7 @@ The package is intended to be complete at a narrow layer:
 ## Durable findings retained
 
 - Oxc parser and transform can run inside workerd through `@alexbruf/wasmkernel` and vendored Oxc WASI bytes.
+- A repo-local parser-only direct ABI artifact can run inside workerd as a static `WebAssembly.Module` with zero Wasm imports.
 - Oxc parser AST access works when the raw one-shot `program` JSON string is read exactly once and materialized with Oxc wrapper-style fixes.
 - Worker Loader can load explicit `mainModule + modules` definitions produced from transformed code and object modules.
 - Dynamic Worker IDs should be content/revision based because Worker Loader caches by ID.
@@ -38,3 +40,5 @@ The removed layer is replaceable: broad graph/package/bundler semantics should c
 ## Completion bar
 
 This package should stay small. Future work should improve the focused Oxc adapter and Worker Loader bridge, not expand into a general bundler.
+
+The direct parser ABI is experimental and parser-only. It should become the long-term parser backend only after parity, memory, artifact-size, and release/provenance checks are strong enough. Transform remains on the current `wasmkernel` bridge until a separate direct transform ABI prototype proves equivalent behavior.

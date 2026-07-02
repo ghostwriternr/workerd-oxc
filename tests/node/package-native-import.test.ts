@@ -15,6 +15,7 @@ describe("native Node package import", () => {
     expect(stdout.trim()).toBe([
       "compileDynamicWorkerModules",
       "dynamicWorkerBuildId",
+      "experimentalParseReactTsxAstDirect",
       "hashDynamicWorkerBuild",
       "loadDynamicWorker",
       "parseReactTsxAst",

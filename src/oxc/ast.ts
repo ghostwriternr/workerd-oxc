@@ -1,5 +1,6 @@
 import { diagnostic, evidence, stringifyCause } from "../diagnostics.ts";
 import type { OxcProgramAst, ParseAstResult, ParseOptions, ToolchainDiagnostic, ToolchainEvidence } from "../types.ts";
+import type { DirectParseDiagnostic } from "./direct-parser-runtime.ts";
 import { getOxcParser } from "./runtime.ts";
 
 interface OxcJsonAstPayload {
@@ -78,8 +79,70 @@ export async function parseReactTsxAst(filename: string, source: string, options
   }
 }
 
+export async function experimentalParseReactTsxAstDirect(filename: string, source: string, options: ParseOptions = {}): Promise<ParseAstResult> {
+  const events: ToolchainEvidence[] = [];
+  const importStarted = performance.now();
+
+  try {
+    const { getDirectParser } = await import("./direct-parser-runtime.ts");
+    await getDirectParser();
+    events.push(evidence("oxc-parser", "import", true, importStarted, "instantiated oxc-parser wasm through direct ABI"));
+  } catch (error) {
+    events.push(evidence("oxc-parser", "import", false, importStarted));
+    return {
+      ok: false,
+      diagnostics: [diagnostic("oxc-parser", "import-failed", "Could not initialize Oxc direct parser in workerd.", error)],
+      evidence: events,
+    };
+  }
+
+  const parseStarted = performance.now();
+  try {
+    const { parseWithDirectParser } = await import("./direct-parser-runtime.ts");
+    const result = await parseWithDirectParser(filename, source, parseOptions(filename, options));
+    const rawProgramLength = typeof result.rawProgramLength === "number" ? result.rawProgramLength : 0;
+
+    if (result.ok !== true) {
+      const directDiagnostics = collectArrayLike(result.diagnostics);
+      events.push(evidence("oxc-parser", "parse", false, parseStarted, `${directDiagnostics.length} direct parser errors`));
+      return {
+        ok: false,
+        rawProgramLength,
+        diagnostics: directDiagnostics.length > 0
+          ? directDiagnostics.map((directDiagnostic) => directParseDiagnostic(filename, directDiagnostic))
+          : [diagnostic("oxc-parser", "parse-failed", "Oxc direct parser failed without structured diagnostics.")],
+        evidence: events,
+      };
+    }
+
+    const ast = materializeOxcAstPayload(result.payload as OxcJsonAstPayload);
+    if (!isProgramAst(ast)) {
+      events.push(evidence("oxc-parser", "parse", false, parseStarted, "direct payload did not materialize to Program"));
+      return {
+        ok: false,
+        rawProgramLength,
+        diagnostics: [diagnostic("oxc-parser", "parse-failed", "Oxc direct parser payload did not materialize to a Program AST.")],
+        evidence: events,
+      };
+    }
+
+    events.push(evidence("oxc-parser", "parse", true, parseStarted, `materialized ${rawProgramLength} bytes of Oxc AST JSON through direct ABI`));
+    return { ok: true, ast, rawProgramLength, diagnostics: [], evidence: events };
+  } catch (error) {
+    events.push(evidence("oxc-parser", "parse", false, parseStarted));
+    return {
+      ok: false,
+      diagnostics: [diagnostic("oxc-parser", "parse-failed", "Oxc direct parser failed to materialize a TSX AST in workerd.", error)],
+      evidence: events,
+    };
+  }
+}
+
 function materializeOxcAst(programJson: string): unknown {
-  const { node, fixes = [] } = JSON.parse(programJson) as OxcJsonAstPayload;
+  return materializeOxcAstPayload(JSON.parse(programJson) as OxcJsonAstPayload);
+}
+
+function materializeOxcAstPayload({ node, fixes = [] }: OxcJsonAstPayload): unknown {
   if (node !== undefined) {
     for (const fixPath of fixes) applyLiteralFix(node, fixPath);
   }
@@ -139,6 +202,20 @@ function parseErrorDiagnostic(filename: string, error: unknown): ToolchainDiagno
     message: String(error),
     file: filename,
     cause: stringifyCause(error),
+  };
+}
+
+function directParseDiagnostic(filename: string, value: unknown): ToolchainDiagnostic {
+  const direct = value as DirectParseDiagnostic;
+  return {
+    tool: "oxc-parser",
+    kind: "parse-failed",
+    severity: direct.severity === "warning" ? "warning" : "error",
+    message: typeof direct.message === "string" ? direct.message : String(value),
+    file: typeof direct.file === "string" && direct.file.length > 0 ? direct.file : filename,
+    span: typeof direct.start === "number" && typeof direct.end === "number"
+      ? { start: direct.start, end: direct.end }
+      : undefined,
   };
 }
 
