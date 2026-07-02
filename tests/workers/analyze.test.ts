@@ -154,6 +154,138 @@ describe("experimentalAnalyze", () => {
     );
   });
 
+  test("exports include type/value and declaration metadata", async () => {
+    const facts = expectOk(
+      await experimentalAnalyze({
+        filename: "src/exports.tsx",
+        lang: "tsx",
+        source: `
+          export type Theme = { accent: string };
+          export interface SlideProps { title: string }
+          export enum SlideKind { Title = "title" }
+          export const accent = "blue";
+          const local = 1;
+          export { local as renamedLocal };
+          export type { SlideProps as PropsAlias };
+        `,
+      }),
+    );
+
+    expect(facts.exports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "named",
+          local: "Theme",
+          exported: "Theme",
+          exportKind: "type",
+          declarationKind: "type",
+        }),
+        expect.objectContaining({
+          kind: "named",
+          local: "SlideProps",
+          exported: "SlideProps",
+          exportKind: "type",
+          declarationKind: "interface",
+        }),
+        expect.objectContaining({
+          kind: "named",
+          local: "SlideKind",
+          exported: "SlideKind",
+          exportKind: "value",
+          declarationKind: "enum",
+        }),
+        expect.objectContaining({
+          kind: "named",
+          local: "accent",
+          exported: "accent",
+          exportKind: "value",
+          declarationKind: "const",
+        }),
+        expect.objectContaining({
+          kind: "named",
+          local: "local",
+          exported: "renamedLocal",
+          exportKind: "value",
+        }),
+        expect.objectContaining({
+          kind: "named",
+          local: "SlideProps",
+          exported: "PropsAlias",
+          exportKind: "type",
+        }),
+      ]),
+    );
+  });
+
+  test("bindings distinguish params and TypeScript declaration kinds", async () => {
+    const facts = expectOk(
+      await experimentalAnalyze({
+        filename: "src/kinds.tsx",
+        lang: "tsx",
+        source: `
+          interface SlideProps { title: string }
+          type Theme = { accent: string };
+          enum SlideKind { Title = "title" }
+          function render(props: SlideProps) {
+            const label = props.title;
+            return label;
+          }
+        `,
+      }),
+    );
+
+    expect(facts.bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "SlideProps", kind: "interface" }),
+        expect.objectContaining({ name: "Theme", kind: "type" }),
+        expect.objectContaining({ name: "SlideKind", kind: "enum" }),
+        expect.objectContaining({ name: "Title", kind: "enum-member" }),
+        expect.objectContaining({ name: "props", kind: "param" }),
+      ]),
+    );
+
+    const enumBinding = facts.bindings.find((binding) => binding.name === "SlideKind");
+    const enumMemberBinding = facts.bindings.find((binding) => binding.name === "Title");
+    expect(enumBinding?.flags).toEqual(expect.arrayContaining(["enum"]));
+    expect(enumMemberBinding?.flags).toEqual(expect.arrayContaining(["enum_member"]));
+
+    expect(facts.references).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "SlideProps", kind: "type" }),
+        expect.objectContaining({ name: "props", kind: "identifier" }),
+      ]),
+    );
+  });
+
+  test("jsx binding ids come from semantic resolution", async () => {
+    const facts = expectOk(
+      await experimentalAnalyze({
+        filename: "src/jsx-resolution.tsx",
+        lang: "tsx",
+        source: `
+          const ValueComponent = () => null;
+          type TypeOnlyComponent = { title: string };
+          const view = (
+            <>
+              <ValueComponent />
+              <TypeOnlyComponent />
+            </>
+          );
+        `,
+      }),
+    );
+
+    const valueBinding = facts.bindings.find((binding) => binding.name === "ValueComponent");
+    const typeOnlyBinding = facts.bindings.find((binding) => binding.name === "TypeOnlyComponent");
+    const valueTag = facts.jsxTags.find((tag) => tag.name === "ValueComponent");
+    const typeOnlyTag = facts.jsxTags.find((tag) => tag.name === "TypeOnlyComponent");
+
+    expect(valueTag?.bindingId).toBe(valueBinding?.id);
+    expect(typeOnlyBinding?.kind).toBe("type");
+    expect(typeOnlyTag?.bindingId).toBeUndefined();
+    expect(Object.hasOwn(typeOnlyTag!, "bindingId")).toBe(false);
+  });
+
   test("intrinsic elements do not resolve to lexical bindings", async () => {
     const facts = expectOk(
       await experimentalAnalyze({

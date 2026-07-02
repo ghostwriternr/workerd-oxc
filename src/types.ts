@@ -109,10 +109,24 @@ export interface ScopeFact {
   span?: OxcSourceSpan;
 }
 
+export type BindingKind =
+  | "import"
+  | "function"
+  | "class"
+  | "const"
+  | "let"
+  | "var"
+  | "param"
+  | "type"
+  | "interface"
+  | "enum"
+  | "enum-member"
+  | "unknown";
+
 export interface BindingFact {
   id: number;
   name: string;
-  kind: string;
+  kind: BindingKind;
   flags: string[];
   scopeId: number;
   span: OxcSourceSpan;
@@ -140,11 +154,27 @@ export interface ImportFact {
   sourceSpan: OxcSourceSpan;
 }
 
+export type ExportKind = "named" | "default" | "all";
+
+export type ExportValueKind = "value" | "type";
+
+export type ExportDeclarationKind =
+  | "function"
+  | "class"
+  | "const"
+  | "let"
+  | "var"
+  | "type"
+  | "interface"
+  | "enum";
+
 export interface ExportFact {
-  kind: "named" | "default" | "all";
+  kind: ExportKind;
   local?: string;
   exported?: string;
   source?: string;
+  exportKind?: ExportValueKind;
+  declarationKind?: ExportDeclarationKind;
   span: OxcSourceSpan;
 }
 

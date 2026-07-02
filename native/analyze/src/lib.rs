@@ -7,9 +7,12 @@ use std::{
 };
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{
-    BindingPattern, Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier,
-    ModuleExportName, Statement,
+use oxc_ast::{
+    AstKind,
+    ast::{
+        BindingPattern, Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier,
+        ImportOrExportKind, ModuleExportName, Statement, VariableDeclarationKind,
+    },
 };
 use oxc_ast_visit::utf8_to_utf16::{Utf8ToUtf16, Utf8ToUtf16Converter};
 use oxc_diagnostics::{OxcDiagnostic, Severity};
@@ -17,7 +20,7 @@ use oxc_parser::{ParseOptions as OxcParseOptions, Parser};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::{GetSpan, SourceType, Span};
 use oxc_syntax::scope::ScopeFlags;
-use oxc_syntax::symbol::SymbolFlags;
+use oxc_syntax::symbol::{SymbolFlags, SymbolId};
 use serde::{Deserialize, Serialize};
 
 const ABI_VERSION: u32 = 1;
@@ -100,6 +103,10 @@ struct ExportFactPayload {
     exported: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    export_kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    declaration_kind: Option<&'static str>,
     span: SpanPayload,
 }
 
@@ -223,7 +230,7 @@ fn scope_kind(flags: ScopeFlags) -> &'static str {
     }
 }
 
-fn binding_kind(flags: SymbolFlags) -> &'static str {
+fn binding_kind(flags: SymbolFlags, declaration_kind: Option<&'static str>) -> &'static str {
     if flags.is_import() {
         "import"
     } else if flags.is_function() {
@@ -232,21 +239,101 @@ fn binding_kind(flags: SymbolFlags) -> &'static str {
         "class"
     } else if flags.is_const_variable() {
         "const"
+    } else if let Some(
+        kind @ ("interface" | "enum" | "enum-member" | "type" | "param" | "let" | "var"),
+    ) = declaration_kind
+    {
+        kind
+    } else if flags.is_interface() {
+        "interface"
+    } else if flags.is_enum() {
+        "enum"
+    } else if flags.is_type_alias() {
+        "type"
     } else if flags.is_block_scoped() {
         "let"
     } else if flags.is_variable() {
         "var"
-    } else if flags.is_type_alias() || flags.is_interface() {
-        "type"
     } else {
         "unknown"
     }
+}
+
+fn declaration_kind_for_symbol(
+    semantic: &oxc_semantic::Semantic<'_>,
+    symbol_id: SymbolId,
+) -> Option<&'static str> {
+    let nodes = semantic.nodes();
+    let mut node_id = semantic.scoping().symbol_declaration(symbol_id);
+
+    for _ in 0..8 {
+        match nodes.kind(node_id) {
+            AstKind::FormalParameter(_) | AstKind::FormalParameterRest(_) => return Some("param"),
+            AstKind::TSTypeAliasDeclaration(_) => return Some("type"),
+            AstKind::TSInterfaceDeclaration(_) => return Some("interface"),
+            AstKind::TSEnumMember(_) => return Some("enum-member"),
+            AstKind::TSEnumDeclaration(_) => return Some("enum"),
+            AstKind::Function(_) => return Some("function"),
+            AstKind::Class(_) => return Some("class"),
+            AstKind::VariableDeclaration(decl) => {
+                return Some(variable_declaration_kind(decl.kind));
+            }
+            AstKind::ImportSpecifier(_)
+            | AstKind::ImportDefaultSpecifier(_)
+            | AstKind::ImportNamespaceSpecifier(_) => return Some("import"),
+            AstKind::Program(_) => return None,
+            _ => {}
+        }
+
+        let parent_kind = nodes.parent_kind(node_id);
+        match parent_kind {
+            AstKind::FormalParameter(_) | AstKind::FormalParameterRest(_) => return Some("param"),
+            AstKind::TSTypeAliasDeclaration(_) => return Some("type"),
+            AstKind::TSInterfaceDeclaration(_) => return Some("interface"),
+            AstKind::TSEnumMember(_) => return Some("enum-member"),
+            AstKind::TSEnumDeclaration(_) => return Some("enum"),
+            AstKind::Function(_) => return Some("function"),
+            AstKind::Class(_) => return Some("class"),
+            AstKind::VariableDeclaration(decl) => {
+                return Some(variable_declaration_kind(decl.kind));
+            }
+            AstKind::ImportSpecifier(_)
+            | AstKind::ImportDefaultSpecifier(_)
+            | AstKind::ImportNamespaceSpecifier(_) => return Some("import"),
+            AstKind::Program(_) => return None,
+            _ => {
+                let parent_id = nodes.parent_id(node_id);
+                if parent_id == node_id {
+                    return None;
+                }
+                node_id = parent_id;
+            }
+        }
+    }
+
+    None
+}
+
+fn variable_declaration_kind(kind: VariableDeclarationKind) -> &'static str {
+    match kind {
+        VariableDeclarationKind::Const => "const",
+        VariableDeclarationKind::Let => "let",
+        VariableDeclarationKind::Var => "var",
+        VariableDeclarationKind::Using | VariableDeclarationKind::AwaitUsing => "const",
+    }
+}
+
+fn export_value_kind(kind: ImportOrExportKind) -> &'static str {
+    if kind.is_type() { "type" } else { "value" }
 }
 
 fn symbol_flags(flags: SymbolFlags) -> Vec<&'static str> {
     let mut list = Vec::new();
     if flags.is_import() {
         list.push("import");
+    }
+    if flags.is_type_import() {
+        list.push("type_import");
     }
     if flags.is_function() {
         list.push("function");
@@ -268,6 +355,18 @@ fn symbol_flags(flags: SymbolFlags) -> Vec<&'static str> {
     }
     if flags.is_interface() {
         list.push("interface");
+    }
+    if flags.is_enum() {
+        list.push("enum");
+    }
+    if flags.is_const_enum() {
+        list.push("const_enum");
+    }
+    if flags.is_enum_member() {
+        list.push("enum_member");
+    }
+    if flags.is_type_parameter() {
+        list.push("type_parameter");
     }
     list
 }
@@ -391,7 +490,8 @@ unsafe fn analyze_inner(
     let mut bindings = Vec::new();
     for symbol_id in scoping.symbol_ids() {
         let name = scoping.symbol_name(symbol_id).to_string();
-        let kind = binding_kind(scoping.symbol_flags(symbol_id));
+        let declaration_kind = declaration_kind_for_symbol(&semantic, symbol_id);
+        let kind = binding_kind(scoping.symbol_flags(symbol_id), declaration_kind);
         let flags = symbol_flags(scoping.symbol_flags(symbol_id));
         let scope_id = scoping.symbol_scope_id(symbol_id).index();
         let span = span_converter.convert(scoping.symbol_span(symbol_id));
@@ -422,8 +522,7 @@ unsafe fn analyze_inner(
     for id in 0..scoping.references_len() {
         let reference_id = oxc_semantic::ReferenceId::from(id);
         let reference = scoping.get_reference(reference_id);
-        let node = semantic.nodes().get_node(reference.node_id());
-        let name = source[node.span().start as usize..node.span().end as usize].to_string();
+        let name = semantic.reference_name(reference).to_string();
 
         let flags_val = reference.flags();
         let mut flags = Vec::new();
@@ -441,7 +540,7 @@ unsafe fn analyze_inner(
 
         let scope_id = reference.scope_id().index();
         let binding_id = reference.symbol_id().map(|sid| sid.index());
-        let span = span_converter.convert(node.span());
+        let span = span_converter.convert(semantic.reference_span(reference));
 
         let payload = ReferenceFactPayload {
             id,
@@ -519,6 +618,8 @@ unsafe fn analyze_inner(
                                     local: Some(id.name.to_string()),
                                     exported: Some(id.name.to_string()),
                                     source: source_str.clone(),
+                                    export_kind: Some("value"),
+                                    declaration_kind: Some("function"),
                                     span: export_span,
                                 });
                             }
@@ -530,11 +631,14 @@ unsafe fn analyze_inner(
                                     local: Some(id.name.to_string()),
                                     exported: Some(id.name.to_string()),
                                     source: source_str.clone(),
+                                    export_kind: Some("value"),
+                                    declaration_kind: Some("class"),
                                     span: export_span,
                                 });
                             }
                         }
                         Declaration::VariableDeclaration(var_decl) => {
+                            let declaration_kind = variable_declaration_kind(var_decl.kind);
                             for declarator in &var_decl.declarations {
                                 if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                                     exports.push(ExportFactPayload {
@@ -542,10 +646,45 @@ unsafe fn analyze_inner(
                                         local: Some(id.name.to_string()),
                                         exported: Some(id.name.to_string()),
                                         source: source_str.clone(),
+                                        export_kind: Some("value"),
+                                        declaration_kind: Some(declaration_kind),
                                         span: export_span,
                                     });
                                 }
                             }
+                        }
+                        Declaration::TSTypeAliasDeclaration(type_decl) => {
+                            exports.push(ExportFactPayload {
+                                kind: "named",
+                                local: Some(type_decl.id.name.to_string()),
+                                exported: Some(type_decl.id.name.to_string()),
+                                source: source_str.clone(),
+                                export_kind: Some("type"),
+                                declaration_kind: Some("type"),
+                                span: export_span,
+                            });
+                        }
+                        Declaration::TSInterfaceDeclaration(interface_decl) => {
+                            exports.push(ExportFactPayload {
+                                kind: "named",
+                                local: Some(interface_decl.id.name.to_string()),
+                                exported: Some(interface_decl.id.name.to_string()),
+                                source: source_str.clone(),
+                                export_kind: Some("type"),
+                                declaration_kind: Some("interface"),
+                                span: export_span,
+                            });
+                        }
+                        Declaration::TSEnumDeclaration(enum_decl) => {
+                            exports.push(ExportFactPayload {
+                                kind: "named",
+                                local: Some(enum_decl.id.name.to_string()),
+                                exported: Some(enum_decl.id.name.to_string()),
+                                source: source_str.clone(),
+                                export_kind: Some("value"),
+                                declaration_kind: Some("enum"),
+                                span: export_span,
+                            });
                         }
                         _ => {}
                     }
@@ -554,25 +693,42 @@ unsafe fn analyze_inner(
                 for spec in &export_decl.specifiers {
                     let local = module_export_name_to_string(&spec.local);
                     let exported = module_export_name_to_string(&spec.exported);
+                    let export_kind =
+                        if export_decl.export_kind.is_type() || spec.export_kind.is_type() {
+                            "type"
+                        } else {
+                            "value"
+                        };
                     exports.push(ExportFactPayload {
                         kind: "named",
                         local: Some(local),
                         exported: Some(exported),
                         source: source_str.clone(),
+                        export_kind: Some(export_kind),
+                        declaration_kind: None,
                         span: span_converter.convert(spec.span),
                     });
                 }
             }
             Statement::ExportDefaultDeclaration(export_decl) => {
                 let export_span = span_converter.convert(export_decl.span);
-                let local_name = match &export_decl.declaration {
-                    ExportDefaultDeclarationKind::FunctionDeclaration(func) => {
-                        func.id.as_ref().map(|id| id.name.to_string())
-                    }
-                    ExportDefaultDeclarationKind::ClassDeclaration(class_decl) => {
-                        class_decl.id.as_ref().map(|id| id.name.to_string())
-                    }
-                    _ => None,
+                let (local_name, export_kind, declaration_kind) = match &export_decl.declaration {
+                    ExportDefaultDeclarationKind::FunctionDeclaration(func) => (
+                        func.id.as_ref().map(|id| id.name.to_string()),
+                        "value",
+                        Some("function"),
+                    ),
+                    ExportDefaultDeclarationKind::ClassDeclaration(class_decl) => (
+                        class_decl.id.as_ref().map(|id| id.name.to_string()),
+                        "value",
+                        Some("class"),
+                    ),
+                    ExportDefaultDeclarationKind::TSInterfaceDeclaration(interface_decl) => (
+                        Some(interface_decl.id.name.to_string()),
+                        "type",
+                        Some("interface"),
+                    ),
+                    _ => (None, "value", None),
                 };
 
                 exports.push(ExportFactPayload {
@@ -580,6 +736,8 @@ unsafe fn analyze_inner(
                     local: local_name,
                     exported: Some("default".to_string()),
                     source: None,
+                    export_kind: Some(export_kind),
+                    declaration_kind,
                     span: export_span,
                 });
             }
@@ -590,6 +748,8 @@ unsafe fn analyze_inner(
                     local: None,
                     exported: None,
                     source: Some(export_decl.source.value.to_string()),
+                    export_kind: Some(export_value_kind(export_decl.export_kind)),
+                    declaration_kind: None,
                     span: export_span,
                 });
             }
@@ -601,7 +761,6 @@ unsafe fn analyze_inner(
     let mut jsx_tags = Vec::new();
     for node in semantic.nodes().iter() {
         if let oxc_ast::AstKind::JSXOpeningElement(elem) = node.kind() {
-            let scope_id = node.scope_id();
             let span = span_converter.convert(elem.span);
 
             match &elem.name {
@@ -616,9 +775,7 @@ unsafe fn analyze_inner(
                 }
                 oxc_ast::ast::JSXElementName::IdentifierReference(id) => {
                     let name = id.name.to_string();
-                    let binding_id = scoping
-                        .find_binding(scope_id, id.name.clone())
-                        .map(|sid| sid.index());
+                    let binding_id = binding_id_for_identifier(scoping, id);
                     jsx_tags.push(JsxTagFactPayload {
                         name,
                         kind: "identifier",
@@ -637,10 +794,13 @@ unsafe fn analyze_inner(
                 }
                 oxc_ast::ast::JSXElementName::MemberExpression(mem) => {
                     let name = get_jsx_member_expr_name(mem);
+                    let binding_id = mem
+                        .get_identifier()
+                        .and_then(|id| binding_id_for_identifier(scoping, id));
                     jsx_tags.push(JsxTagFactPayload {
                         name,
                         kind: "member",
-                        binding_id: None,
+                        binding_id,
                         span,
                     });
                 }
@@ -766,6 +926,16 @@ pub extern "C" fn free_result(handle: u32) {
     RESULTS.with(|results| {
         results.borrow_mut().remove(&handle);
     });
+}
+
+fn binding_id_for_identifier(
+    scoping: &oxc_semantic::Scoping,
+    id: &oxc_ast::ast::IdentifierReference<'_>,
+) -> Option<usize> {
+    id.reference_id
+        .get()
+        .and_then(|reference_id| scoping.get_reference(reference_id).symbol_id())
+        .map(|symbol_id| symbol_id.index())
 }
 
 fn get_jsx_member_expr_name(mem: &oxc_ast::ast::JSXMemberExpression<'_>) -> String {

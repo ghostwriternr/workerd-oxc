@@ -3,6 +3,8 @@ import { describe, expect, test, vi } from "vitest";
 import type {
   AnalyzeInput,
   AnalyzeOutput,
+  BindingFact,
+  ExportFact,
   OxcResult,
   ReferenceFact,
   TransformInput,
@@ -43,6 +45,45 @@ describe("public API types", () => {
     void syncResult;
     expect(true).toBe(true);
   });
+  test("analyzer fact kinds expose semantic variants", () => {
+    const binding: BindingFact = {
+      id: 1,
+      name: "props",
+      kind: "param",
+      flags: ["variable"],
+      scopeId: 0,
+      span: { start: 0, end: 5 },
+      references: [],
+    };
+    const exportedType: ExportFact = {
+      kind: "named",
+      local: "SlideProps",
+      exported: "SlideProps",
+      exportKind: "type",
+      declarationKind: "interface",
+      span: { start: 0, end: 32 },
+    };
+
+    // @ts-expect-error analyzer does not emit catch-all binding kind strings.
+    const invalidBinding: BindingFact = { ...binding, kind: "parameter" };
+    // @ts-expect-error export form and type/value category are separate fields.
+    const invalidExportKind: ExportFact = { ...exportedType, kind: "interface" };
+    // @ts-expect-error exportKind is value/type, not declaration syntax.
+    const invalidExportValueKind: ExportFact = { ...exportedType, exportKind: "interface" };
+    const invalidExportDeclarationKind: ExportFact = {
+      ...exportedType,
+      // @ts-expect-error declarationKind only contains direct export declaration categories.
+      declarationKind: "enum-member",
+    };
+
+    expect(binding.kind).toBe("param");
+    expect(exportedType.exportKind).toBe("type");
+    expect(invalidBinding.kind).toBe("parameter");
+    expect(invalidExportKind.kind).toBe("interface");
+    expect(invalidExportValueKind.exportKind).toBe("interface");
+    expect(invalidExportDeclarationKind.declarationKind).toBe("enum-member");
+  });
+
   test("reference kind only exposes emitted analyzer variants", () => {
     const identifierReference: ReferenceFact = {
       id: 1,

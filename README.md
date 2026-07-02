@@ -158,8 +158,17 @@ See [`src/types.ts`](src/types.ts) for each fact's fields.
   specifiers are not resolved.
 - Spans are JavaScript UTF-16 string offsets into `source`.
 - `id`, `scopeId`, and `bindingId` are stable only within a single result.
-- Intrinsic (lowercase) JSX tags are not bound to lexical variables; only
-  component tags carry a `bindingId`.
+- `BindingFact.kind` reports the declaration category when Oxc exposes one,
+  including `"param"`, `"type"`, `"interface"`, `"enum"`, and
+  `"enum-member"`.
+- `ExportFact.kind` reports the export form (`"named"`, `"default"`, or
+  `"all"`). `ExportFact.exportKind` reports `"value"` or `"type"`; for
+  export specifiers this is the syntactic `type` marker as written, because
+  specifiers are not resolved. `ExportFact.declarationKind` reports the
+  declaration category for direct declaration exports.
+- Intrinsic (lowercase) JSX tags are not bound to lexical variables. Component
+  tags carry a `bindingId` only when Oxc semantic resolution resolves the tag;
+  unresolved or type-only JSX names omit it.
 - Absent optional fields are omitted, not set to `null`.
 - This API is experimental; the fact shape may change in a minor version
   before it stabilizes. For why the analyzer stops at per-file facts, see
