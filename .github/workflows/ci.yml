@@ -35,6 +35,7 @@ jobs:
         run: |
           git ls-files --error-unmatch src/wasm/parser.wasm src/wasm/transform.wasm
           npm run wasm:check
+          npm run build
           npm run pack:check
           npm run test:node
           npm run test:workers
