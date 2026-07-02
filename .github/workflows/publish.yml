@@ -1,0 +1,77 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt
+          targets: wasm32-unknown-unknown
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify stable release tag
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "package.json version $version does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "publish.yml only publishes stable x.y.z versions; got $version"
+            exit 1
+          fi
+
+      - name: Test committed package state
+        run: |
+          git ls-files --error-unmatch src/wasm/parser.wasm src/wasm/transform.wasm
+          npm run wasm:check
+          npm run build
+          npm run pack:check
+          npm run test:node
+          npm run test:workers
+
+      - name: Validate wasm rebuild from source
+        run: |
+          npm run build:wasm
+          npm run wasm:check
+          npm run test:node
+          npm run test:workers
+
+      - name: Restore committed release artifacts
+        run: |
+          git restore src/wasm/parser.wasm src/wasm/transform.wasm
+          npm run build
+          npm run pack:check
+
+      - name: Check release workspace
+        run: npm run check
+
+      - name: Packed consumer smoke test
+        run: npm run pack:worker
+
+      - name: Publish to npm
+        run: npm publish --access public
