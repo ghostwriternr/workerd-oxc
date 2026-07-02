@@ -31,16 +31,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify committed wasm artifacts
+        run: |
+          git ls-files --error-unmatch src/wasm/parser.wasm src/wasm/transform.wasm
+          npm run pack:check
+          npm run test:node
+          npm run test:workers
+
       - name: Rebuild wasm artifacts
         run: npm run build:wasm
 
-      - name: Verify committed wasm artifacts are current
-        run: |
-          status="$(git status --porcelain -- src/wasm/parser.wasm src/wasm/transform.wasm)"
-          if [ -n "$status" ]; then
-            echo "$status"
-            exit 1
-          fi
-
-      - name: Check
+      - name: Check rebuilt workspace
         run: npm run check
