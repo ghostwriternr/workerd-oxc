@@ -1,32 +1,15 @@
-import type { DiagnosticKind, SourceLocation, SourceSpan, ToolName, ToolchainDiagnostic, ToolchainEvidence } from "./types.ts";
+import type { OxcDiagnostic, OxcSourceLocation, OxcSourceSpan } from "./types.ts";
 
-export function diagnostic(tool: ToolName, kind: DiagnosticKind, message: string, cause?: unknown): ToolchainDiagnostic {
+export function runtimeDiagnostic(phase: "parse" | "transform" | "runtime", message: string, cause?: unknown): OxcDiagnostic {
   return {
-    tool,
-    kind,
-    severity: kind === "warning" ? "warning" : "error",
+    phase,
+    severity: "error",
     message,
     cause: stringifyCause(cause),
   };
 }
 
-export function diagnosticAtSourceOffset(
-  tool: ToolName,
-  kind: DiagnosticKind,
-  message: string,
-  options: { source: string; offset: number; end?: number; file?: string; cause?: unknown },
-): ToolchainDiagnostic {
-  const location = sourceLocationAtOffset(options.source, options.offset);
-  return {
-    ...diagnostic(tool, kind, message, options.cause),
-    file: options.file,
-    line: location.line,
-    column: location.column,
-    span: sourceSpan(options.source, options.offset, options.end),
-  };
-}
-
-export function sourceLocationAtOffset(source: string, offset: number): SourceLocation {
+export function sourceLocationAtOffset(source: string, offset: number): OxcSourceLocation {
   const clampedOffset = clampOffset(source, offset);
   let line = 1;
   let lineStart = 0;
@@ -41,26 +24,12 @@ export function sourceLocationAtOffset(source: string, offset: number): SourceLo
   return { line, column: clampedOffset - lineStart + 1 };
 }
 
-export function sourceOffsetAtLocation(source: string, location: SourceLocation): number {
-  const targetLine = Math.max(1, Math.trunc(location.line));
-  const targetColumn = Math.max(1, Math.trunc(location.column));
-  let line = 1;
-  let lineStart = 0;
-
-  for (let index = 0; index < source.length && line < targetLine; index += 1) {
-    if (source[index] === "\n") {
-      line += 1;
-      lineStart = index + 1;
-    }
-  }
-
-  const lineEnd = source.indexOf("\n", lineStart);
-  const maxOffset = lineEnd === -1 ? source.length : lineEnd;
-  return Math.min(lineStart + targetColumn - 1, maxOffset);
-}
-
-export function evidence(tool: ToolName, stage: ToolchainEvidence["stage"], ok: boolean, started: number, detail?: string): ToolchainEvidence {
-  return { tool, stage, ok, durationMs: Math.round(performance.now() - started), detail };
+export function sourceSpan(source: string, start: number, end = start): OxcSourceSpan {
+  const clampedStart = clampOffset(source, start);
+  const clampedEnd = clampOffset(source, end);
+  return clampedStart <= clampedEnd
+    ? { start: clampedStart, end: clampedEnd }
+    : { start: clampedEnd, end: clampedStart };
 }
 
 export function stringifyCause(cause: unknown): string | undefined {
@@ -71,14 +40,6 @@ export function stringifyCause(cause: unknown): string | undefined {
   } catch {
     return String(cause);
   }
-}
-
-function sourceSpan(source: string, start: number, end = start): SourceSpan {
-  const clampedStart = clampOffset(source, start);
-  const clampedEnd = clampOffset(source, end);
-  return clampedStart <= clampedEnd
-    ? { start: clampedStart, end: clampedEnd }
-    : { start: clampedEnd, end: clampedStart };
 }
 
 function clampOffset(source: string, offset: number): number {

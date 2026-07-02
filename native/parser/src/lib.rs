@@ -2,6 +2,7 @@ use std::{alloc::{alloc as rust_alloc, dealloc, Layout}, cell::RefCell, collecti
 
 use oxc_allocator::Allocator;
 use oxc_ast_visit::utf8_to_utf16::Utf8ToUtf16;
+use oxc_diagnostics::{OxcDiagnostic, Severity};
 use oxc_parser::{ParseOptions as OxcParseOptions, Parser};
 use oxc_span::SourceType;
 use serde::{Deserialize, Serialize};
@@ -115,13 +116,7 @@ unsafe fn parse_inner(
 
     let diagnostic_payloads = diagnostics
         .iter()
-        .map(|diagnostic| DiagnosticPayload {
-            severity: "error",
-            message: diagnostic.to_string(),
-            file: filename.to_string(),
-            start: None,
-            end: None,
-        })
+        .map(|diagnostic| diagnostic_payload(filename, diagnostic))
         .collect::<Vec<_>>();
 
     let converter = Utf8ToUtf16::new(source);
@@ -147,6 +142,25 @@ unsafe fn parse_inner(
             diagnostics: diagnostic_payloads,
         })
         .unwrap()
+    }
+}
+
+fn diagnostic_payload(filename: &str, diagnostic: &OxcDiagnostic) -> DiagnosticPayload {
+    let (start, end) = diagnostic
+        .labels
+        .first()
+        .map(|label| {
+            let span = label.inner();
+            (Some(span.offset()), Some(span.offset() + span.len()))
+        })
+        .unwrap_or((None, None));
+
+    DiagnosticPayload {
+        severity: if diagnostic.severity == Severity::Warning { "warning" } else { "error" },
+        message: diagnostic.to_string(),
+        file: filename.to_string(),
+        start,
+        end,
     }
 }
 

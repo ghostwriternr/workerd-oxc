@@ -1,6 +1,6 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "workerd-oxc-tests",
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "workerd-oxc-worker-loader-example",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-30",
   "worker_loaders": [{ "binding": "LOADER" }]

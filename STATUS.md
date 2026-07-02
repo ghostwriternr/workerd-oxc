@@ -1,44 +1,44 @@
 # Status
 
-`workerd-oxc` is an experimental, focused package extracted from a broader Dynamic Worker builder spike.
+`workerd-oxc` is a focused Cloudflare workerd-only Oxc adapter.
 
 ## Current scope
 
-The package is intended to be complete at a narrow layer:
+The package currently provides:
 
-- initialize Oxc parser/transform inside Cloudflare workerd;
-- materialize full TS/TSX Oxc ASTs safely;
-- prove direct Oxc parser and transform Wasm ABIs that avoid N-API/wasmkernel;
-- transform one TS/TSX/JSX module at a time;
-- compile explicit caller-supplied module maps into Worker Loader definitions;
-- provide Dynamic Worker build IDs and Worker Loader helper functions.
+- static `parser.wasm` and `transform.wasm` artifacts built from repo-local Rust wrappers around Oxc crates;
+- zero-import Wasm artifact shape for both parser and transform;
+- a tiny TypeScript pointer/length/result ABI host;
+- `createOxc()` for initialized parser/transform instances;
+- async top-level `parse()` and `transform()` convenience functions;
+- sync instance `oxc.parse()` and `oxc.transform()` methods;
+- normalized source-aware diagnostics;
+- optional Source Map v3 output from transform;
+- an example-only Worker Loader proof.
 
-## Durable findings retained
+## Runtime properties
 
-- Oxc parser and transform can run inside workerd through `@alexbruf/wasmkernel` and vendored Oxc WASI bytes.
-- Repo-local direct parser and direct transform ABI artifacts can run inside workerd as static `WebAssembly.Module` imports with zero Wasm imports.
-- Oxc parser AST access works when the raw one-shot `program` JSON string is read exactly once and materialized with Oxc wrapper-style fixes.
-- Worker Loader can load explicit `mainModule + modules` definitions produced from transformed code and object modules.
-- Dynamic Worker IDs should be content/revision based because Worker Loader caches by ID.
-
-## Intentionally removed from the clean package
-
-The previous spike explored package snapshots, CJS require scanning, React package controls, SWC/Babel/Rolldown comparisons, measurements, and session caches. Those remain available in git history under tag `spike-archive-2026-07-02`, but they are not part of this package.
-
-The removed layer is replaceable: broad graph/package/bundler semantics should come from a real bundler backend such as esbuild today or a future workerd-compatible Rolldown, not from this package growing a custom JavaScript bundler.
+The runtime path does not use N-API, emnapi, WASI, `@alexbruf/wasmkernel`, `@bjorn3/browser_wasi_shim`, runtime Wasm fetch/compile, browser `Worker`, or shared-memory host setup.
 
 ## Non-goals
 
-- npm fetching
-- full package resolution
-- CJS/ESM compatibility layers
-- CSS/assets/import-url handling
-- dynamic import/require support
-- app-framework compilation
-- Vite/esbuild/Rolldown replacement
+This package does not provide:
 
-## Completion bar
+- npm fetching;
+- package resolution;
+- CJS/ESM compatibility layers;
+- CSS/assets/import-url handling;
+- dynamic import/require support;
+- bundling;
+- Vite/esbuild/Rolldown replacement behavior;
+- core Worker Loader helper APIs.
 
-This package should stay small. Future work should improve the focused Oxc adapter and Worker Loader bridge, not expand into a general bundler.
+Worker Loader remains only as an example showing that transformed output can be loaded manually as a Dynamic Worker.
 
-The direct parser and transform ABIs are experimental. The direct transform prototype strips TypeScript, lowers TSX with the automatic JSX runtime, emits a source map, returns structured source-aware diagnostics, and recovers after failed transforms. Stable parser/transform APIs should switch to the direct backends only after broader parity, memory, artifact-size, source-map, and release/provenance checks are strong enough.
+## Known limitations
+
+- Transform is one-file-at-a-time and leaves imports as source-level imports.
+- Public transform options are intentionally narrow.
+- Source-map lookup helpers are not exposed yet.
+- Performance, memory, artifact-size, release, and provenance hardening still need dedicated follow-up before publishing.
+- Shared Rust ABI helper refactoring is deferred until the parser and transform ABI shapes settle further.

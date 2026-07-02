@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Experimental Oxc parser and transform adapter for Cloudflare workerd.",
+  "description": "Oxc parser and transform adapter for Cloudflare workerd using direct WebAssembly modules.",
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -11,16 +11,13 @@
     }
   },
   "scripts": {
-    "build:direct-parser": "cargo build --manifest-path native/oxc-direct-parser/Cargo.toml --target wasm32-unknown-unknown --release && cp native/oxc-direct-parser/target/wasm32-unknown-unknown/release/workerd_oxc_direct_parser.wasm src/wasm/oxc-direct-parser.wasm",
-    "build:direct-transform": "cargo build --manifest-path native/oxc-direct-transform/Cargo.toml --target wasm32-unknown-unknown --release && cp native/oxc-direct-transform/target/wasm32-unknown-unknown/release/workerd_oxc_direct_transform.wasm src/wasm/oxc-direct-transform.wasm",
+    "build:parser": "cargo build --manifest-path native/parser/Cargo.toml --target wasm32-unknown-unknown --release && cp native/parser/target/wasm32-unknown-unknown/release/workerd_oxc_parser.wasm src/wasm/parser.wasm",
+    "build:transform": "cargo build --manifest-path native/transform/Cargo.toml --target wasm32-unknown-unknown --release && cp native/transform/target/wasm32-unknown-unknown/release/workerd_oxc_transform.wasm src/wasm/transform.wasm",
+    "build:wasm": "npm run build:parser && npm run build:transform",
     "test": "vitest run --config vitest.config.ts && vitest run --config vitest.workers.config.ts",
     "test:node": "vitest run --config vitest.config.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@alexbruf/wasmkernel": "^0.2.1",
-    "@bjorn3/browser_wasi_shim": "^0.4.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "latest",

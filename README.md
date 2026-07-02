@@ -1,211 +1,151 @@
 # workerd-oxc
 
-`workerd-oxc` is a small experimental adapter for running Oxc parser and transform inside Cloudflare `workerd`.
+`workerd-oxc` runs Oxc parser and transform inside Cloudflare workerd using static zero-import WebAssembly modules.
 
-It provides:
+It is a small workerd-only adapter around repo-local Oxc Wasm artifacts:
 
-- full TS/TSX AST materialization from Oxc inside workerd;
-- experimental direct Oxc parser and transform ABIs that avoid N-API/wasmkernel;
-- one-file TS/TSX/JSX transformation through Oxc inside workerd;
-- explicit module-map compilation for Dynamic Workers / Worker Loader;
-- Worker Loader definition/loading helpers;
-- deterministic Dynamic Worker build IDs;
-- structured diagnostics and source-location helpers.
-
-It is **not** a bundler, package manager, npm resolver, Vite replacement, Rolldown replacement, esbuild replacement, or general React app compiler.
-
-## Why this exists
-
-Cloudflare Workers can import `.wasm` files as precompiled `WebAssembly.Module` objects, but workerd does not allow runtime Wasm compilation from arbitrary bytes and does not expose browser `Worker` threads. Published Oxc/Rolldown browser/WASI glue is therefore not directly usable in workerd as-is.
-
-This package keeps the useful, bounded part of the earlier spike: expose a safe Oxc AST adapter, expose a one-file transform adapter, and bridge explicit output module maps to Dynamic Workers.
-
-The stable parser and transform paths still instantiate Oxc's WASI/N-API binaries through `@alexbruf/wasmkernel`. The experimental direct paths prove the cleaner long-term architecture: repo-local Oxc Wasm wrappers with a small pointer/length ABI, imported by workerd as static `WebAssembly.Module` objects, with no N-API/emnapi host and no runtime Wasm fetch/compile.
-
-The broad JavaScript ecosystem layer is intentionally left to real bundlers. If you need npm fetching, package resolution, CJS/ESM compatibility, CSS/assets, or arbitrary React app builds today, use a bundler-oriented path such as `@cloudflare/worker-bundler`/esbuild or wait for a workerd-compatible Rolldown backend.
-
-## Install
-
-```sh
-npm install workerd-oxc
+```txt
+Cloudflare workerd
+  -> static parser.wasm      # wasm32-unknown-unknown, zero imports
+  -> static transform.wasm   # wasm32-unknown-unknown, zero imports
+  -> tiny TypeScript ABI host
+  -> parse + transform API
 ```
 
-This package is experimental and currently private in this repo.
+## What it provides
+
+- Oxc TS/TSX/JS/JSX parsing inside workerd.
+- Full Oxc `Program` AST materialization.
+- One-file Oxc transform inside workerd.
+- Source-aware diagnostics with JavaScript UTF-16 string-offset spans.
+- Optional Source Map v3 output from transform.
+- A Worker Loader example proving transformed output can be loaded manually.
+
+## What it avoids
+
+The runtime path does **not** use:
+
+- N-API or emnapi;
+- WASI;
+- `@alexbruf/wasmkernel`;
+- `@bjorn3/browser_wasi_shim`;
+- runtime Wasm `fetch()`;
+- runtime Wasm compilation from bytes;
+- browser `Worker` threads;
+- shared-memory host setup.
+
+This package is **not** a bundler, package manager, npm resolver, Vite replacement, Rolldown replacement, esbuild replacement, or arbitrary React app compiler. It does not implement package resolution, CJS/ESM compatibility layers, CSS/assets/import-url handling, dynamic import/require support, or module graph rewriting.
+
+Worker Loader is example-only. The core package does not export Worker Loader helpers.
 
 ## API
 
-### `parseReactTsxAst(filename, source, options?)`
+```ts
+import { createOxc, parse, transform } from "workerd-oxc";
+```
 
-Parses TS/TSX/JS/JSX with Oxc inside workerd and returns a materialized Oxc `Program` AST.
+### Top-level convenience functions
+
+Top-level functions lazily initialize a default Oxc instance, so they are async.
 
 ```ts
-import { parseReactTsxAst } from "workerd-oxc";
-
-const result = await parseReactTsxAst("src/component.tsx", `
-  type Props = { label: string };
-  export function Component(props: Props) {
-    return <span>{props.label}</span>;
-  }
-`);
-
-if (result.ok) {
-  console.log(result.ast.type); // "Program"
-}
-```
-
-The raw Oxc N-API parser exposes `result.program` as a one-shot JSON string. `parseReactTsxAst()` reads it exactly once, parses the `{ node, fixes }` payload, and applies Oxc wrapper-style BigInt/RegExp literal fixes before returning the AST.
-
-### `experimentalParseReactTsxAstDirect(filename, source, options?)`
-
-Parses TS/TSX/JS/JSX with the repo-local direct parser Wasm artifact instead of the `wasmkernel` N-API bridge.
-
-```ts
-import { experimentalParseReactTsxAstDirect } from "workerd-oxc";
-
-const result = await experimentalParseReactTsxAstDirect("src/component.tsx", `
-  export const view = <main>Hello</main>;
-`);
-```
-
-This is intentionally experimental. It exists to prove the long-term architecture: `src/wasm/oxc-direct-parser.wasm` is imported as a static `WebAssembly.Module`, exposes a tiny direct ABI, and currently has **zero Wasm imports**.
-
-Build the direct parser artifact with:
-
-```sh
-npm run build:direct-parser
-```
-
-### `transformReactTsx(filename, source, options?)`
-
-Transforms one source file with Oxc inside workerd through the current bridge backend.
-
-```ts
-import { transformReactTsx } from "workerd-oxc";
-
-const result = await transformReactTsx("src/component.tsx", `
-  export const view = <span>Hello</span>;
-`);
-
-if (result.ok) {
-  console.log(result.code);
-}
-```
-
-This is a one-file transform. It does not resolve imports or bundle dependencies.
-
-### `experimentalTransformReactTsxDirect(filename, source, options?)`
-
-Transforms one source file through the repo-local direct transform Wasm artifact instead of the `wasmkernel` N-API bridge.
-
-```ts
-import { experimentalTransformReactTsxDirect } from "workerd-oxc";
-
-const result = await experimentalTransformReactTsxDirect("src/component.tsx", `
-  type Props = { label: string };
-  export function Component(props: Props) {
-    return <span>{props.label}</span>;
-  }
-`);
-```
-
-`src/wasm/oxc-direct-transform.wasm` is imported as a static `WebAssembly.Module`, exposes the same small ABI shape as the direct parser, and currently has **zero Wasm imports**. The prototype strips TypeScript, lowers TSX with the automatic JSX runtime, emits a source map, returns structured diagnostics, and recovers after failed transforms. It is still experimental; the stable `transformReactTsx()` API remains on the bridge backend until parity, artifact-size, memory, source-map, and release/provenance checks are stronger.
-
-Build the direct transform artifact with:
-
-```sh
-npm run build:direct-transform
-```
-
-### `compileDynamicWorkerModules(input)`
-
-Transforms an explicit caller-supplied module map into a complete Worker Loader module map.
-
-```ts
-import {
-  compileDynamicWorkerModules,
-  dynamicWorkerBuildId,
-  loadDynamicWorker,
-} from "workerd-oxc";
-
-const build = await compileDynamicWorkerModules({
-  entrypoint: "src/index.ts",
-  modules: {
-    "src/index.ts": `
-      import { message } from "./message.js";
-      export default { fetch() { return new Response(message) } };
-    `,
-    "src/message.ts": `export const message: string = "hello";`,
-  },
+const parsed = await parse({
+  filename: "src/component.tsx",
+  source: `
+    type Props = { label: string };
+    export function Component(props: Props) {
+      return <span>{props.label}</span>;
+    }
+  `,
+  lang: "tsx",
+  range: true,
 });
 
-if (build.ok) {
-  const id = dynamicWorkerBuildId("demo", build);
-  const worker = loadDynamicWorker(env.LOADER, id, build, {
-    compatibilityDate: "2026-06-30",
-  });
+if (parsed.ok) {
+  console.log(parsed.value.ast.type); // "Program"
+}
+
+const transformed = await transform({
+  filename: "src/component.tsx",
+  source: `export const view = <main>Hello</main>;`,
+  jsx: { runtime: "automatic", importSource: "react" },
+  sourcemap: true,
+});
+
+if (transformed.ok) {
+  console.log(transformed.value.code);
+  console.log(transformed.value.map);
 }
 ```
 
-Important: this is an **explicit module-map compiler**, not a resolver. If `src/index.ts` imports `./message.js`, the caller must provide a module that emits `src/message.js`. TypeScript input files emit `.js` module keys; object modules keep their supplied keys.
+### Initialized instance
 
-### `toLoaderDefinition(build, options?)` / `loadDynamicWorker(loader, id, build, options?)`
-
-Convert a successful build to the Worker Loader definition shape and call `env.LOADER.get(id, ...)`.
-
-### `hashDynamicWorkerBuild(build)` / `dynamicWorkerBuildId(prefix, build)`
-
-Hash a complete `mainModule + modules` map and derive a revision-style Worker Loader ID. Worker Loader caches by ID, so changed code should use a changed ID.
-
-The hash is deterministic across module insertion order, canonicalizes JSON object key order, includes object module type tags and `ArrayBuffer` bytes, and rejects failed/incomplete builds.
-
-## Supported module input shapes
-
-`compileDynamicWorkerModules()` accepts:
+`createOxc()` pays the Wasm instantiation cost once. Instance methods are synchronous because initialized parser/transform calls are CPU-bound Wasm calls.
 
 ```ts
-type DynamicWorkerModuleContent =
-  | string
-  | { js: string }
-  | { cjs: string }
-  | { json: unknown }
-  | { text: string }
-  | { data: ArrayBuffer }
-  | { wasm: ArrayBuffer };
+const oxc = await createOxc();
+
+const parsed = oxc.parse({
+  filename: "src/component.tsx",
+  source: `export const view = <main>Hello</main>;`,
+});
+
+const transformed = oxc.transform({
+  filename: "src/component.tsx",
+  source: `export const view = <main>Hello</main>;`,
+  sourcemap: false,
+});
 ```
 
-String source modules are transformed with Oxc. Object modules are preserved as Worker Loader object modules.
+## Types
 
-## Unsupported by design
+```ts
+type OxcLanguage = "js" | "jsx" | "ts" | "tsx";
+type OxcSourceType = "module" | "script";
 
-| Capability | Status |
-| --- | --- |
-| Oxc TS/TSX AST in workerd | Supported |
-| Direct Oxc parser ABI | Experimental prototype, zero-import Wasm artifact |
-| Direct Oxc transform ABI | Experimental prototype, zero-import Wasm artifact |
-| Oxc one-file transform in workerd | Supported through current bridge; direct backend experimental |
-| Explicit Dynamic Worker module maps | Supported |
-| Worker Loader build IDs | Supported |
-| npm fetching | Not supported |
-| package.json exports / Node resolution | Not supported |
-| CJS require scanning/rewriting | Not supported |
-| CSS/assets/import-url pipelines | Not supported |
-| dynamic import/require support | Not supported |
-| arbitrary React app compilation | Not supported |
-| Rolldown backend | Deferred until upstream workerd-compatible initialization exists |
+type OxcResult<T> =
+  | { ok: true; value: T; diagnostics: OxcDiagnostic[] }
+  | { ok: false; diagnostics: OxcDiagnostic[] };
+```
+
+Diagnostics use this coordinate contract:
+
+- `location.line` is 1-based.
+- `location.column` is 1-based.
+- `span.start` and `span.end` are JavaScript UTF-16 string offsets.
+- Native Oxc UTF-8 byte spans are converted before diagnostics are exposed.
+
+## Build the Wasm artifacts
+
+```sh
+npm run build:wasm
+```
+
+This builds:
+
+- `src/wasm/parser.wasm`
+- `src/wasm/transform.wasm`
+
+Both artifacts are expected to have `WebAssembly.Module.imports(module) === []`.
 
 ## Tests
 
 ```sh
-npm run build:direct-parser
-npm run build:direct-transform
+npm run build:wasm
 npm run typecheck
 npm test
 npm run test:node
 npm run test:workers
 ```
 
-The Workers tests run with `@cloudflare/vitest-pool-workers` and a Worker Loader binding named `LOADER`.
+The Workers tests run with `@cloudflare/vitest-pool-workers`. The Worker Loader proof test uses a binding named `LOADER` but constructs the loader definition manually.
+
+## Worker Loader example
+
+See `examples/worker-loader/` for a manual Dynamic Worker / Worker Loader proof. It uses `createOxc()` and then calls `env.LOADER.get()` directly. No Worker Loader helper is exported by this package.
 
 ## Archive note
 
-This clean package replaces a broader research spike. The previous exploratory state is preserved in git history and tagged as `spike-archive-2026-07-02`.
+Earlier history in this repository explored a broader Dynamic Worker builder spike, bridge-based Oxc execution, package snapshots, CJS scanning, React package controls, SWC/Babel/Rolldown comparisons, measurements, and session caches.
+
+That work is intentionally outside the current package boundary. The previous exploratory state is preserved in git history and tagged as `spike-archive-2026-07-02`.

@@ -1,23 +1,18 @@
-export { hashDynamicWorkerBuild, dynamicWorkerBuildId } from "./build-id.ts";
-export { compileDynamicWorkerModules } from "./dynamic-worker.ts";
-export { loadDynamicWorker, toLoaderDefinition } from "./loader.ts";
-export { experimentalParseReactTsxAstDirect, parseReactTsxAst } from "./oxc/ast.ts";
-export { experimentalTransformReactTsxDirect, transformReactTsx } from "./oxc/transform.ts";
+export { createOxc, parse, transform } from "./oxc.ts";
 export type {
-  DynamicWorkerBuildOutput,
-  DynamicWorkerLoaderDefinition,
-  DynamicWorkerModuleContent,
-  DynamicWorkerModules,
-  ExplicitModuleCompileInput,
-  LoadedDynamicWorker,
+  CreateOxcOptions,
+  Oxc,
+  OxcDiagnostic,
+  OxcJsxOptions,
+  OxcLanguage,
   OxcProgramAst,
-  ParseAstResult,
-  ParseOptions,
-  SourceLocation,
-  SourceSpan,
-  ToolchainDiagnostic,
-  ToolchainEvidence,
-  TransformOptions,
-  TransformResult,
-  WorkerLoaderBinding,
+  OxcResult,
+  OxcSourceLocation,
+  OxcSourceSpan,
+  OxcSourceType,
+  ParseInput,
+  ParseOutput,
+  SourceMapV3,
+  TransformInput,
+  TransformOutput,
 } from "./types.ts";

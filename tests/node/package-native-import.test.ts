@@ -5,23 +5,13 @@ import { describe, expect, test } from "vitest";
 const execFileAsync = promisify(execFile);
 
 describe("native Node package import", () => {
-  test("self-imports without eagerly loading workerd-only Oxc runtime modules", async () => {
+  test("self-imports without eagerly loading workerd-only wasm modules", async () => {
     const { stdout } = await execFileAsync(process.execPath, [
       "--input-type=module",
       "--eval",
       `const mod = await import("workerd-oxc"); console.log(Object.keys(mod).sort().join(","));`,
     ], { cwd: process.cwd() });
 
-    expect(stdout.trim()).toBe([
-      "compileDynamicWorkerModules",
-      "dynamicWorkerBuildId",
-      "experimentalParseReactTsxAstDirect",
-      "experimentalTransformReactTsxDirect",
-      "hashDynamicWorkerBuild",
-      "loadDynamicWorker",
-      "parseReactTsxAst",
-      "toLoaderDefinition",
-      "transformReactTsx",
-    ].join(","));
+    expect(stdout.trim()).toBe("createOxc,parse,transform");
   });
 });
