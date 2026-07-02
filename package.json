@@ -1,6 +1,6 @@
 {
   "name": "workerd-oxc",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Oxc parser and transform adapter for Cloudflare workerd using direct WebAssembly modules.",
   "keywords": [
     "cloudflare-workers",
