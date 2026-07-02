@@ -53,6 +53,7 @@
     "lint": "oxlint --deny-warnings .",
     "lint:fix": "oxlint --fix .",
     "pack:check": "node scripts/check-pack.mjs",
+    "pack:worker": "node scripts/check-packed-worker.mjs",
     "prepare": "npm run build",
     "test": "npm run build && npm run test:run",
     "test:node": "vitest run --config vitest.config.ts",

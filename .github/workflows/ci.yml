@@ -45,3 +45,6 @@ jobs:
 
       - name: Check rebuilt workspace
         run: npm run check
+
+      - name: Packed consumer smoke test
+        run: npm run pack:worker
