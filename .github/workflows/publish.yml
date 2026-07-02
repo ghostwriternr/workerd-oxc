@@ -45,28 +45,6 @@ jobs:
             exit 1
           fi
 
-      - name: Test committed package state
-        run: |
-          git ls-files --error-unmatch src/wasm/parser.wasm src/wasm/transform.wasm
-          npm run wasm:check
-          npm run build
-          npm run pack:check
-          npm run test:node
-          npm run test:workers
-
-      - name: Validate wasm rebuild from source
-        run: |
-          npm run build:wasm
-          npm run wasm:check
-          npm run test:node
-          npm run test:workers
-
-      - name: Restore committed release artifacts
-        run: |
-          git restore src/wasm/parser.wasm src/wasm/transform.wasm
-          npm run build
-          npm run pack:check
-
       - name: Check release workspace
         run: npm run check
 

@@ -24,18 +24,11 @@ if (result.ok) {
 
 ## Install
 
-Not published to npm. Add it as a git dependency:
-
-```json
-{
-  "dependencies": {
-    "workerd-oxc": "github:ghostwriternr/workerd-oxc"
-  }
-}
+```sh
+npm install workerd-oxc
 ```
 
-The `.wasm` artifacts are committed, so a git install works without a Rust
-toolchain. To rebuild them yourself, see [Building](#building-from-source).
+The npm package includes prebuilt `.wasm` artifacts, so consumers do not need a Rust toolchain. Source checkouts build those artifacts from Rust; see [Building](#building-from-source).
 
 ## Usage
 
@@ -161,9 +154,9 @@ passed in.
 ```
 your Worker
   └─ workerd-oxc
-       ├─ src/wasm/parser.wasm      (wasm32-unknown-unknown, 0 imports)
-       ├─ src/wasm/transform.wasm   (wasm32-unknown-unknown, 0 imports)
-       └─ a small pointer/length/result ABI in TypeScript
+       ├─ dist/wasm/parser.wasm      (wasm32-unknown-unknown, 0 imports)
+       ├─ dist/wasm/transform.wasm   (wasm32-unknown-unknown, 0 imports)
+       └─ a small pointer/length/result ABI in JavaScript
 ```
 
 The `.wasm` files are Rust crates ([`native/`](native)) that wrap the Oxc
@@ -207,11 +200,11 @@ Requires Rust 1.95.0 with the `wasm32-unknown-unknown` target. The repo includes
 npm run build:wasm
 ```
 
-This rebuilds `src/wasm/parser.wasm` and `src/wasm/transform.wasm`.
+`npm run build:wasm` generates `src/wasm/parser.wasm` and `src/wasm/transform.wasm`. `npm run build` runs that step and then copies the artifacts into `dist/wasm/` for packaging.
 
 ## Wasm artifacts
 
-The parser and transformer `.wasm` files are committed because Workers load them as static `WebAssembly.Module` imports. A git install should work without Rust.
+The parser and transformer `.wasm` files are generated from the Rust crates and shipped in the npm package because Workers load them as static `WebAssembly.Module` imports. Runtime consumers should not need Rust or a Wasm build step.
 
 For artifact details:
 

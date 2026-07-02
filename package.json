@@ -1,6 +1,6 @@
 {
   "name": "workerd-oxc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Oxc parser and transform adapter for Cloudflare workerd using direct WebAssembly modules.",
   "keywords": [
     "cloudflare-workers",
@@ -46,9 +46,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node scripts/build.mjs && npm run dist:check",
-    "build:wasm": "cargo build --locked --workspace --target wasm32-unknown-unknown --release && cp target/wasm32-unknown-unknown/release/workerd_oxc_parser.wasm src/wasm/parser.wasm && cp target/wasm32-unknown-unknown/release/workerd_oxc_transform.wasm src/wasm/transform.wasm",
-    "check": "npm run lint && npm run fmt:check && npm run wasm:check && npm run build && npm run pack:check && npm run pack:lint && npm run types:lint && npm run test:run",
+    "build": "npm run build:wasm && npm run build:dist",
+    "build:dist": "node scripts/build.mjs && npm run dist:check",
+    "build:wasm": "cargo build --locked --workspace --target wasm32-unknown-unknown --release && mkdir -p src/wasm && cp target/wasm32-unknown-unknown/release/workerd_oxc_parser.wasm src/wasm/parser.wasm && cp target/wasm32-unknown-unknown/release/workerd_oxc_transform.wasm src/wasm/transform.wasm",
+    "check": "npm run lint && npm run fmt:check && npm run build && npm run wasm:check && npm run pack:check && npm run pack:lint && npm run types:lint && npm run test:run",
     "dist:check": "node scripts/check-dist.mjs",
     "fix": "npm run lint:fix && npm run fmt",
     "fmt": "oxfmt --write . && cargo fmt --all",
