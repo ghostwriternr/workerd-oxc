@@ -1,8 +1,12 @@
-import type { CreateOxcOptions, Oxc, OxcResult, ParseInput, ParseOutput, TransformInput, TransformOutput } from "./types.ts";
+import type { Oxc, OxcResult, ParseInput, ParseOutput, TransformInput, TransformOutput } from "./types.ts";
 
 let defaultOxcPromise: Promise<Oxc> | undefined;
 
-export async function createOxc(_options: CreateOxcOptions = {}): Promise<Oxc> {
+export async function createOxc(): Promise<Oxc> {
+  if (arguments.length > 0) {
+    throw new TypeError("createOxc() does not accept options.");
+  }
+
   const [{ createParserRuntime }, { createTransformRuntime }] = await Promise.all([
     import("./parser.ts"),
     import("./transform.ts"),

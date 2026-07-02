@@ -103,8 +103,8 @@ function transformOptions(input: TransformInput): Record<string, unknown> {
   };
 }
 
-function normalizeTarget(target: string | string[] | undefined): string {
-  return typeof target === "string" ? target : "es2022";
+function normalizeTarget(target: TransformInput["target"]): string {
+  return target ?? "es2022";
 }
 
 function normalizeJsx(jsx: TransformInput["jsx"]): unknown {

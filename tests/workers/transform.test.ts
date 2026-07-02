@@ -72,7 +72,7 @@ describe("transform", () => {
     const diagnostics = expectFailure(await transform({
       filename: "src/target.ts",
       source: `export const value: string = "ok";`,
-      target: ["es2022", "es2020"],
+      target: ["es2022", "es2020"] as never,
     }));
 
     expect(diagnostics[0]).toMatchObject({

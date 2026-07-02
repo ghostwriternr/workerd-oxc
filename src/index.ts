@@ -1,6 +1,5 @@
 export { createOxc, parse, transform } from "./oxc.ts";
 export type {
-  CreateOxcOptions,
   Oxc,
   OxcDiagnostic,
   OxcJsxOptions,

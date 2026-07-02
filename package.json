@@ -14,7 +14,7 @@
     "build:parser": "cargo build --manifest-path native/parser/Cargo.toml --target wasm32-unknown-unknown --release && cp native/parser/target/wasm32-unknown-unknown/release/workerd_oxc_parser.wasm src/wasm/parser.wasm",
     "build:transform": "cargo build --manifest-path native/transform/Cargo.toml --target wasm32-unknown-unknown --release && cp native/transform/target/wasm32-unknown-unknown/release/workerd_oxc_transform.wasm src/wasm/transform.wasm",
     "build:wasm": "npm run build:parser && npm run build:transform",
-    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.workers.config.ts",
+    "test": "npm run typecheck && vitest run --config vitest.config.ts && vitest run --config vitest.workers.config.ts",
     "test:node": "vitest run --config vitest.config.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "typecheck": "tsc --noEmit"

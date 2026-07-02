@@ -23,7 +23,7 @@ export interface TransformInput {
   source: string;
   lang?: OxcLanguage;
   sourceType?: OxcSourceType;
-  target?: string | string[];
+  target?: string;
   sourcemap?: boolean;
   jsx?: "preserve" | OxcJsxOptions;
 }
@@ -78,8 +78,6 @@ export interface SourceMapV3 {
   mappings: string;
   sourceRoot?: string;
 }
-
-export interface CreateOxcOptions {}
 
 export interface Oxc {
   parse(input: ParseInput): OxcResult<ParseOutput>;

@@ -67,7 +67,7 @@ parse or transform is a plain CPU-bound Wasm call.
 
 ## API
 
-### `createOxc(options?): Promise<Oxc>`
+### `createOxc(): Promise<Oxc>`
 
 Instantiates the parser and transformer and returns an instance with
 synchronous `parse` and `transform` methods.
