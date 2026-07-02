@@ -199,10 +199,9 @@ Loader wiring is left to you — it is not part of this package's API.
 
 ## Building from source
 
-Requires a Rust toolchain with the `wasm32-unknown-unknown` target:
+Requires Rust 1.95.0 with the `wasm32-unknown-unknown` target. The repo includes `rust-toolchain.toml`, so `rustup` will install the right toolchain/target automatically:
 
 ```sh
-rustup target add wasm32-unknown-unknown
 npm run build:wasm
 ```
 
