@@ -1,43 +1,42 @@
 import { describe, expect, test } from "vitest";
 
 import { createOxc, parse } from "../../src/index";
+import { expectOk } from "./helpers";
+
+const TSX_SOURCE = `
+  type Props = { label: string; count?: number };
+  export function Component(props: Props) {
+    return <section data-kind="fixture">{props.label}</section>;
+  }
+`;
 
 describe("parse", () => {
-  const source = `
-    type Props = { label: string; count?: number };
-    export function Component(props: Props) {
-      return <section data-kind="direct">{props.label}</section>;
-    }
-  `;
+  test("top-level parse materializes a TSX Program AST", async () => {
+    const { ast, rawProgramLength } = expectOk(await parse({
+      filename: "src/component.tsx",
+      source: TSX_SOURCE,
+      range: true,
+    }));
 
-  test("top-level async parse materializes TSX ASTs inside workerd", async () => {
-    const result = await parse({ filename: "src/component.tsx", source, range: true });
-
-    expect(result.ok, JSON.stringify(result.diagnostics, null, 2)).toBe(true);
-    if (!result.ok) return;
-
-    expect(result.value.rawProgramLength).toBeGreaterThan(1000);
-    expect(result.value.ast.type).toBe("Program");
-    expect(result.value.ast.sourceType).toBe("module");
-    expect(result.value.ast.body.some((node) => (node as { type?: string }).type === "TSTypeAliasDeclaration")).toBe(true);
-    expect(JSON.stringify(result.value.ast)).toContain("JSXElement");
+    expect(rawProgramLength).toBeGreaterThan(1000);
+    expect(ast).toMatchObject({ type: "Program", sourceType: "module" });
+    expect(ast.body.some((node) => (node as { type?: string }).type === "TSTypeAliasDeclaration")).toBe(true);
+    expect(JSON.stringify(ast)).toContain("JSXElement");
   });
 
-  test("createOxc returns an instance with sync parse", async () => {
+  test("createOxc exposes sync parse", async () => {
     const oxc = await createOxc();
+    const { ast } = expectOk(oxc.parse({ filename: "src/component.tsx", source: TSX_SOURCE, range: true }));
 
-    const result = oxc.parse({ filename: "src/component.tsx", source, lang: "tsx", astType: "ts", range: true });
-
-    expect(result.ok, JSON.stringify(result.diagnostics, null, 2)).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.ast.type).toBe("Program");
+    expect(ast.type).toBe("Program");
   });
 
-  test("infers TypeScript for .cts filenames", async () => {
-    const result = await parse({ filename: "src/config.cts", source: `const value: string = "ok";` });
+  test("infers TypeScript from .cts filenames", async () => {
+    const { ast } = expectOk(await parse({
+      filename: "src/config.cts",
+      source: `const value: string = "ok";`,
+    }));
 
-    expect(result.ok, JSON.stringify(result.diagnostics, null, 2)).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.ast.body.some((node) => (node as { type?: string }).type === "VariableDeclaration")).toBe(true);
+    expect(ast.body.some((node) => (node as { type?: string }).type === "VariableDeclaration")).toBe(true);
   });
 });

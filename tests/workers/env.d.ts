@@ -1,8 +1,7 @@
 interface WorkerLoaderDefinition {
   mainModule: string;
-  modules: Record<string, string | { js: string } | { cjs: string } | { json: unknown } | { text: string } | { data: ArrayBuffer } | { wasm: ArrayBuffer }>;
+  modules: Record<string, string>;
   compatibilityDate: string;
-  compatibilityFlags?: string[];
 }
 
 interface LoadedWorker {

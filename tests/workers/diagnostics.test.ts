@@ -1,66 +1,54 @@
 import { describe, expect, test } from "vitest";
 
 import { parse, transform } from "../../src/index";
+import { expectFailure } from "./helpers";
+
+const BROKEN_TSX = `export const broken = <div>;`;
 
 describe("diagnostics", () => {
-  test("parse failures return normalized source-aware diagnostics", async () => {
-    const result = await parse({ filename: "src/broken.tsx", source: `export const broken = <div>;` });
+  test("parse failures are normalized and source-aware", async () => {
+    const [diagnostic] = expectFailure(await parse({ filename: "src/broken.tsx", source: BROKEN_TSX }));
 
-    expect(result.ok).toBe(false);
-    expect(result.diagnostics[0]).toMatchObject({
+    expect(diagnostic).toMatchObject({
       phase: "parse",
       severity: "error",
       filename: "src/broken.tsx",
       location: { line: 1 },
+      span: { start: expect.any(Number) },
+      message: expect.any(String),
     });
-    expect(result.diagnostics[0]?.message).toEqual(expect.any(String));
-    expect(result.diagnostics[0]?.span?.start).toEqual(expect.any(Number));
   });
 
-  test("transform failures return normalized source-aware diagnostics", async () => {
-    const result = await transform({ filename: "src/broken.tsx", source: `\n  export const broken = <div>;` });
+  test("transform failures are normalized and source-aware", async () => {
+    const [diagnostic] = expectFailure(await transform({
+      filename: "src/broken.tsx",
+      source: `\n  ${BROKEN_TSX}`,
+    }));
 
-    expect(result.ok).toBe(false);
-    expect(result.diagnostics[0]).toMatchObject({
+    expect(diagnostic).toMatchObject({
       phase: "transform",
       severity: "error",
       filename: "src/broken.tsx",
       location: { line: 2 },
     });
-    expect(result.diagnostics[0]?.span?.start).toBeGreaterThan(0);
+    expect(diagnostic?.span?.start).toBeGreaterThan(0);
   });
 
-  test("transform diagnostic spans are JavaScript string offsets, not native UTF-8 byte offsets", async () => {
-    const source = `const café = 1;\nexport const broken = <div>;`;
-    const result = await transform({ filename: "src/non-ascii.tsx", source });
+  test.each([
+    ["parse", parse] as const,
+    ["transform", transform] as const,
+  ])("%s spans use JavaScript string offsets", async (phase, operation) => {
+    const source = `const café = 1;\n${BROKEN_TSX}`;
+    const [diagnostic] = expectFailure(await operation({ filename: `src/non-ascii-${phase}.tsx`, source }));
 
-    expect(result.ok).toBe(false);
-    const diagnostic = result.diagnostics[0];
     expect(diagnostic).toMatchObject({
-      phase: "transform",
-      filename: "src/non-ascii.tsx",
+      phase,
+      filename: `src/non-ascii-${phase}.tsx`,
       location: {
         line: 2,
         column: source.split("\n")[1]!.lastIndexOf(";") + 1,
       },
+      span: { start: source.lastIndexOf(";") },
     });
-    expect(diagnostic?.span?.start).toBe(source.lastIndexOf(";"));
-  });
-
-  test("parse diagnostic spans are JavaScript string offsets, not native UTF-8 byte offsets", async () => {
-    const source = `const café = 1;\nexport const broken = <div>;`;
-    const result = await parse({ filename: "src/non-ascii.tsx", source });
-
-    expect(result.ok).toBe(false);
-    const diagnostic = result.diagnostics[0];
-    expect(diagnostic).toMatchObject({
-      phase: "parse",
-      filename: "src/non-ascii.tsx",
-      location: {
-        line: 2,
-        column: source.split("\n")[1]!.lastIndexOf(";") + 1,
-      },
-    });
-    expect(diagnostic?.span?.start).toBe(source.lastIndexOf(";"));
   });
 });

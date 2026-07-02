@@ -2,12 +2,13 @@ import { env } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 
 import { createOxc } from "../../src/index";
+import { expectOk } from "./helpers";
 
 describe("Worker Loader example proof", () => {
   test("loads transformed output with a manual Worker Loader definition", async () => {
     const oxc = await createOxc();
-    const transformed = oxc.transform({
-      filename: "index.tsx",
+    const { code } = expectOk(oxc.transform({
+      filename: "index.ts",
       source: `
         export default {
           fetch() {
@@ -15,17 +16,11 @@ describe("Worker Loader example proof", () => {
           }
         };
       `,
-      sourcemap: false,
-    });
-
-    expect(transformed.ok, JSON.stringify(transformed.diagnostics, null, 2)).toBe(true);
-    if (!transformed.ok) return;
+    }));
 
     const worker = env.LOADER.get("manual-oxc-transform-example", () => ({
       mainModule: "index.js",
-      modules: {
-        "index.js": transformed.value.code,
-      },
+      modules: { "index.js": code },
       compatibilityDate: "2026-06-30",
     }));
 
