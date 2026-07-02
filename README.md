@@ -29,7 +29,7 @@ Not published to npm. Add it as a git dependency:
 ```json
 {
   "dependencies": {
-    "workerd-oxc": "github:ghostwriternr/builder"
+    "workerd-oxc": "github:ghostwriternr/workerd-oxc"
   }
 }
 ```
