@@ -41,16 +41,17 @@ const parsed = await parse({ filename: "app.tsx", source });
 const transformed = await transform({ filename: "app.tsx", source });
 ```
 
-Create an explicit instance when you work in a hot path. It pays
-initialization once, then runs synchronously:
+Create an explicit instance when you work in a hot path. Operation runtimes are
+initialized lazily, so using only `parse` does not instantiate transform or
+analyze Wasm:
 
 ```ts
 import { createOxc } from "workerd-oxc";
 
 const oxc = await createOxc();
 
-oxc.parse({ filename: "app.tsx", source });
-oxc.transform({ filename: "app.tsx", source });
+await oxc.parse({ filename: "app.tsx", source });
+await oxc.transform({ filename: "app.tsx", source });
 ```
 
 Every call returns a result object rather than throwing on expected failures.
@@ -70,11 +71,11 @@ if (result.ok) {
 
 ### `createOxc(): Promise<Oxc>`
 
-Instantiates the Wasm modules and returns an instance with synchronous
-`parse`, `transform`, and `experimentalAnalyze` methods. Takes no arguments.
+Returns an instance with async `parse`, `transform`, and `experimentalAnalyze`
+methods. Takes no arguments.
 
-Instance methods are synchronous because, once the module is instantiated,
-each call is a plain CPU-bound Wasm call.
+The instance lazily initializes one Wasm runtime per operation. A parser-only
+caller does not pay to instantiate transform or analyzer Wasm.
 
 ### `parse(input): Promise<OxcResult<ParseOutput>>` / `oxc.parse(input)`
 
@@ -161,17 +162,25 @@ See [`src/types.ts`](src/types.ts) for each fact's fields.
 - `BindingFact.kind` reports the declaration category when Oxc exposes one,
   including `"param"`, `"type"`, `"interface"`, `"enum"`, and
   `"enum-member"`.
-- `ExportFact.kind` reports the export form (`"named"`, `"default"`, or
-  `"all"`). `ExportFact.exportKind` reports `"value"` or `"type"`; for
-  export specifiers this is the syntactic `type` marker as written, because
-  specifiers are not resolved. `ExportFact.declarationKind` reports the
-  declaration category for direct declaration exports.
+- `ImportFact.specifierKind` reports the import form (`"named"`, `"default"`,
+  or `"namespace"`). Only named imports include `imported`; default and
+  namespace imports do not use sentinel strings.
+- `ExportFact.kind` is a discriminant for the export form (`"named"`,
+  `"default"`, or `"all"`). Named exports include `local` and `exported`;
+  all-exports include `source` and include `exported` only for namespace
+  re-exports such as `export * as ns from "./mod"`; default exports use
+  `exported: "default"`. `ExportFact.exportKind` reports `"value"` or `"type"`; for export specifiers
+  this is the syntactic `type` marker as written, because specifiers are not
+  resolved. `ExportFact.declarationKind` reports the declaration category for
+  direct declaration exports.
 - `JsxTagFact.span` is the opening tag span. `nameSpan` is the exact tag-name
   span. `elementSpan` covers the whole JSX element. Non-self-closing elements
   also include `closingSpan` and `closingNameSpan`.
-- JSX tag facts include source-order `attributes` and `children`. Attribute
-  values and child expressions expose spans only; expressions are not evaluated.
-  JSX text facts expose syntax text, not React-rendered whitespace semantics.
+- JSX tag facts include source-order `attributes` and `children`. `parentId`
+  follows JSX child hierarchy, not broad lexical containment; JSX elements in
+  attribute expressions are emitted as separate root tags. Attribute values and
+  child expressions expose spans only; expressions are not evaluated. JSX text
+  facts expose syntax text, not React-rendered whitespace semantics.
 - Intrinsic (lowercase) JSX tags are not bound to lexical variables. Component
   tags carry a `bindingId` only when Oxc semantic resolution resolves the tag;
   unresolved or type-only JSX names omit it.
@@ -198,7 +207,7 @@ A successful result can still carry warnings, so gate on `ok`, not on
 
 ```ts
 interface OxcDiagnostic {
-  phase: "parse" | "transform" | "runtime";
+  phase: "parse" | "transform" | "analyze" | "runtime";
   severity: "error" | "warning";
   message: string;
   filename?: string;
@@ -220,7 +229,7 @@ your Worker
        ├─ dist/wasm/parser.wasm      (wasm32-unknown-unknown, 0 imports)
        ├─ dist/wasm/transform.wasm   (wasm32-unknown-unknown, 0 imports)
        ├─ dist/wasm/analyze.wasm     (wasm32-unknown-unknown, 0 imports)
-       └─ a small pointer/length/result ABI in JavaScript
+       └─ a shared pointer/length/result ABI in JavaScript and Rust
 ```
 
 Workers can't compile WebAssembly at runtime — no `WebAssembly.compile`, no

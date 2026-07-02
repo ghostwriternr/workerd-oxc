@@ -50,7 +50,7 @@ export type OxcProgramAst = {
 };
 
 export interface OxcDiagnostic {
-  phase: "parse" | "transform" | "runtime";
+  phase: "parse" | "transform" | "analyze" | "runtime";
   severity: "error" | "warning";
   message: string;
   filename?: string;
@@ -80,9 +80,9 @@ export interface SourceMapV3 {
 }
 
 export interface Oxc {
-  parse(input: ParseInput): OxcResult<ParseOutput>;
-  transform(input: TransformInput): OxcResult<TransformOutput>;
-  experimentalAnalyze(input: AnalyzeInput): OxcResult<AnalyzeOutput>;
+  parse(input: ParseInput): Promise<OxcResult<ParseOutput>>;
+  transform(input: TransformInput): Promise<OxcResult<TransformOutput>>;
+  experimentalAnalyze(input: AnalyzeInput): Promise<OxcResult<AnalyzeOutput>>;
 }
 
 export interface AnalyzeInput {
@@ -145,14 +145,26 @@ export interface ReferenceFact {
   span: OxcSourceSpan;
 }
 
-export interface ImportFact {
-  source: string;
-  local: string;
-  imported: string | "default" | "namespace";
-  kind: "value" | "type";
-  span: OxcSourceSpan;
-  sourceSpan: OxcSourceSpan;
-}
+export type ImportSpecifierKind = "named" | "default" | "namespace";
+
+export type ImportFact =
+  | {
+      specifierKind: "named";
+      source: string;
+      local: string;
+      imported: string;
+      kind: "value" | "type";
+      span: OxcSourceSpan;
+      sourceSpan: OxcSourceSpan;
+    }
+  | {
+      specifierKind: "default" | "namespace";
+      source: string;
+      local: string;
+      kind: "value" | "type";
+      span: OxcSourceSpan;
+      sourceSpan: OxcSourceSpan;
+    };
 
 export type ExportKind = "named" | "default" | "all";
 
@@ -168,15 +180,34 @@ export type ExportDeclarationKind =
   | "interface"
   | "enum";
 
-export interface ExportFact {
-  kind: ExportKind;
-  local?: string;
-  exported?: string;
-  source?: string;
-  exportKind?: ExportValueKind;
-  declarationKind?: ExportDeclarationKind;
-  span: OxcSourceSpan;
-}
+export type ExportFact =
+  | {
+      kind: "named";
+      local: string;
+      exported: string;
+      source?: string;
+      exportKind?: ExportValueKind;
+      declarationKind?: ExportDeclarationKind;
+      span: OxcSourceSpan;
+    }
+  | {
+      kind: "default";
+      exported: "default";
+      local?: string;
+      source?: never;
+      exportKind?: ExportValueKind;
+      declarationKind?: ExportDeclarationKind;
+      span: OxcSourceSpan;
+    }
+  | {
+      kind: "all";
+      local?: never;
+      exported?: string;
+      source: string;
+      exportKind?: ExportValueKind;
+      declarationKind?: never;
+      span: OxcSourceSpan;
+    };
 
 export interface JsxTagFact {
   id: number;

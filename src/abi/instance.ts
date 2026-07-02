@@ -59,5 +59,11 @@ export function instantiateAbiModule<T extends OxcAbiExports>(
     throw new Error(`${label} ABI did not export WebAssembly.Memory.`);
   }
 
+  for (const name of ["alloc", "free", "result_ptr", "result_len", "free_result"] as const) {
+    if (typeof exports[name] !== "function") {
+      throw new Error(`${label} ABI did not export ${name}().`);
+    }
+  }
+
   return exports;
 }

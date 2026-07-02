@@ -8,6 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+workerd_oxc_abi = { path = "../abi" }
 oxc_allocator = "0.138.0"
 oxc_ast = { version = "0.138.0", features = ["serialize"] }
 oxc_ast_visit = { version = "0.138.0", features = ["serialize"] }

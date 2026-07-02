@@ -1,31 +1,10 @@
 import parserModule from "./wasm/parser.wasm";
 
-import {
-  sourceLocationAtOffset,
-  sourceSpan,
-  runtimeDiagnostic,
-  stringifyCause,
-} from "./diagnostics.ts";
-import type {
-  OxcDiagnostic,
-  OxcLanguage,
-  OxcProgramAst,
-  OxcResult,
-  ParseInput,
-  ParseOutput,
-} from "./types.ts";
-import { instantiateAbiModule, type ParserAbiExports } from "./abi/instance.ts";
-import { AbiMemoryScope } from "./abi/memory.ts";
-import { readJsonResult } from "./abi/result.ts";
-import { byteOffsetToStringOffset } from "./abi/utf8.ts";
-
-interface DirectParseDiagnostic {
-  severity?: unknown;
-  message?: unknown;
-  file?: unknown;
-  start?: unknown;
-  end?: unknown;
-}
+import { collectArrayLike, normalizeNativeDiagnostic } from "./abi/diagnostics.ts";
+import { createAbiOperationRuntime, isRuntimeError } from "./abi/operation.ts";
+import { isTypeScriptFilename, languageForFilename, stringifyJsonOptions } from "./source.ts";
+import type { OxcProgramAst, OxcResult, ParseInput, ParseOutput } from "./types.ts";
+import type { ParserAbiExports } from "./abi/instance.ts";
 
 interface DirectParsePayload {
   abiVersion?: unknown;
@@ -46,58 +25,35 @@ export interface ParserRuntime {
 }
 
 export function createParserRuntime(): ParserRuntime {
-  let exports = instantiateAbiModule<ParserAbiExports>(parserModule, "Oxc parser");
+  const runtime = createAbiOperationRuntime<ParserAbiExports>({
+    module: parserModule,
+    label: "Oxc parser",
+  });
 
   return {
     parse(input) {
-      try {
-        return parseWithExports(exports, input);
-      } catch (error) {
-        // Traps or malformed host inputs may leave linear memory state uncertain.
-        // Recreate the instance before the next call.
-        try {
-          exports = instantiateAbiModule<ParserAbiExports>(parserModule, "Oxc parser");
-        } catch {
-          // Preserve the original error in this call's diagnostic.
-        }
-        return {
-          ok: false,
-          diagnostics: [runtimeDiagnostic("runtime", "Oxc parser runtime failed.", error)],
-        };
-      }
+      const payload = runtime.call<DirectParsePayload>({
+        filename: input.filename,
+        source: input.source,
+        optionsJson: stringifyJsonOptions(parseOptions(input), "Oxc parser"),
+        invoke: (exports, args) => exports.parse(...args),
+      });
+      if (isRuntimeError(payload)) return { ok: false, diagnostics: [payload.runtimeError] };
+      return parsePayload(input, payload);
     },
   };
-}
-
-function parseWithExports(exports: ParserAbiExports, input: ParseInput): OxcResult<ParseOutput> {
-  const scope = new AbiMemoryScope(exports);
-  try {
-    const filename = scope.writeString(input.filename);
-    const source = scope.writeString(input.source);
-    const optionsJson = JSON.stringify(parseOptions(input));
-    if (optionsJson === undefined) throw new Error("Oxc parser options must be JSON-serializable.");
-    const options = scope.writeString(optionsJson);
-
-    const handle = exports.parse(
-      filename.ptr,
-      filename.len,
-      source.ptr,
-      source.len,
-      options.ptr,
-      options.len,
-    );
-    const payload = readJsonResult<DirectParsePayload>(exports, handle);
-    return parsePayload(input, payload);
-  } finally {
-    scope.dispose();
-  }
 }
 
 function parsePayload(input: ParseInput, payload: DirectParsePayload): OxcResult<ParseOutput> {
   const rawProgramLength =
     typeof payload.rawProgramLength === "number" ? payload.rawProgramLength : 0;
-  const diagnostics = collectArrayLike(payload.diagnostics).map((diagnostic) =>
-    normalizeDiagnostic(input, diagnostic),
+  const diagnostics = collectArrayLike(payload.diagnostics).map((value) =>
+    normalizeNativeDiagnostic({
+      filename: input.filename,
+      source: input.source,
+      phase: "parse",
+      value,
+    }),
   );
 
   if (payload.ok !== true) {
@@ -145,28 +101,6 @@ function parseOptions(input: ParseInput): Record<string, unknown> {
   };
 }
 
-function normalizeDiagnostic(input: ParseInput, value: unknown): OxcDiagnostic {
-  const direct = value as DirectParseDiagnostic;
-  const start =
-    typeof direct.start === "number"
-      ? byteOffsetToStringOffset(input.source, direct.start)
-      : undefined;
-  const end =
-    typeof direct.end === "number" ? byteOffsetToStringOffset(input.source, direct.end) : undefined;
-  const location = start === undefined ? undefined : sourceLocationAtOffset(input.source, start);
-  return {
-    phase: "parse",
-    severity: direct.severity === "warning" ? "warning" : "error",
-    message: typeof direct.message === "string" ? direct.message : String(value),
-    filename:
-      typeof direct.file === "string" && direct.file.length > 0 ? direct.file : input.filename,
-    location,
-    span:
-      start !== undefined && end !== undefined ? sourceSpan(input.source, start, end) : undefined,
-    cause: stringifyCause(value),
-  };
-}
-
 function materializeOxcAstPayload({ node, fixes = [] }: OxcJsonAstPayload): unknown {
   if (node !== undefined) {
     for (const fixPath of fixes) applyLiteralFix(node, fixPath);
@@ -207,25 +141,4 @@ function isProgramAst(value: unknown): value is OxcProgramAst {
     (value as { type?: unknown }).type === "Program" &&
     Array.isArray((value as { body?: unknown }).body)
   );
-}
-
-function languageForFilename(filename: string): OxcLanguage {
-  if (filename.endsWith(".tsx")) return "tsx";
-  if (filename.endsWith(".ts") || filename.endsWith(".mts") || filename.endsWith(".cts"))
-    return "ts";
-  if (filename.endsWith(".jsx")) return "jsx";
-  return "js";
-}
-
-function isTypeScriptFilename(filename: string): boolean {
-  return (
-    filename.endsWith(".ts") ||
-    filename.endsWith(".tsx") ||
-    filename.endsWith(".mts") ||
-    filename.endsWith(".cts")
-  );
-}
-
-function collectArrayLike(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }

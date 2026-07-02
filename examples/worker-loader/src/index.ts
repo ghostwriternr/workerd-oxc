@@ -17,7 +17,7 @@ export default {
   async fetch(_request: Request, env: Env): Promise<Response> {
     const oxc = await createOxc();
 
-    const transformed = oxc.transform({
+    const transformed = await oxc.transform({
       filename: "index.ts",
       source: `
         export default {

@@ -75,7 +75,7 @@ try {
         expect(topLevel.value.map).toMatchObject({ version: 3 });
 
         const oxc = await createOxc();
-        const parsed = oxc.parse({ filename: "src/component.tsx", source: 'export const view = <span>{"ok"}</span>;' });
+        const parsed = await oxc.parse({ filename: "src/component.tsx", source: 'export const view = <span>{"ok"}</span>;' });
         expect(parsed.ok, JSON.stringify(parsed.diagnostics, null, 2)).toBe(true);
       });
     });

@@ -37,19 +37,21 @@ describe("experimentalAnalyze", () => {
         expect.objectContaining({
           source: "./slides/title",
           local: "TitleSlide",
-          imported: "default",
+          specifierKind: "default",
           kind: "value",
         }),
         expect.objectContaining({
           source: "./slides/title",
           local: "color",
           imported: "accentColor",
+          specifierKind: "named",
           kind: "value",
         }),
         expect.objectContaining({
           source: "./theme",
           local: "Theme",
           imported: "Theme",
+          specifierKind: "named",
           kind: "type",
         }),
       ]),
@@ -109,7 +111,9 @@ describe("experimentalAnalyze", () => {
     const slideTag = facts.jsxTags.find((tag) => tag.name === "Slide");
     expect(slideTag?.bindingId).toBe(slideBinding?.id);
 
-    const deckExport = facts.exports.find((exportFact) => exportFact.exported === "Deck");
+    const deckExport = facts.exports.find(
+      (exportFact) => exportFact.kind === "named" && exportFact.exported === "Deck",
+    );
     expect(deckExport?.source).toBeUndefined();
     expect(Object.hasOwn(deckExport!, "source")).toBe(false);
   });
@@ -117,7 +121,7 @@ describe("experimentalAnalyze", () => {
   test("instance exposes sync experimentalAnalyze", async () => {
     const oxc = await createOxc();
     const facts = expectOk(
-      oxc.experimentalAnalyze({
+      await oxc.experimentalAnalyze({
         filename: "src/component.tsx",
         source: `const Component = () => <Widget />;`,
       }),
@@ -149,7 +153,11 @@ describe("experimentalAnalyze", () => {
     expect(result.ok).toBe(false);
     expect(result.diagnostics).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ phase: "parse", severity: "error", filename: "src/broken.tsx" }),
+        expect.objectContaining({
+          phase: "analyze",
+          severity: "error",
+          filename: "src/broken.tsx",
+        }),
       ]),
     );
   });
@@ -451,5 +459,93 @@ const view = <Panel title="😀">Hi 😀</Panel>;`;
     const text = panel!.children.find((child) => child.kind === "text");
     expect(text).toBeDefined();
     expect(source.slice(text!.span.start, text!.span.end)).toBe("Hi 😀");
+  });
+
+  test("exports distinguish namespace export-all declarations", async () => {
+    const facts = expectOk(
+      await experimentalAnalyze({
+        filename: "src/reexports.ts",
+        source: `
+          export * from "./plain";
+          export * as named from "./named";
+          export type * as Types from "./types";
+        `,
+      }),
+    );
+
+    expect(facts.exports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "all", source: "./plain", exportKind: "value" }),
+        expect.objectContaining({
+          kind: "all",
+          source: "./named",
+          exported: "named",
+          exportKind: "value",
+        }),
+        expect.objectContaining({
+          kind: "all",
+          source: "./types",
+          exported: "Types",
+          exportKind: "type",
+        }),
+      ]),
+    );
+  });
+
+  test("exports include names from destructuring declarations", async () => {
+    const facts = expectOk(
+      await experimentalAnalyze({
+        filename: "src/destructure.ts",
+        source: `
+          const source = { one: 1, nested: { two: 2 }, rest: 3 };
+          const values = ["first", "second"];
+          export const { one, nested: { two }, ...rest } = source;
+          export const [first, second] = values;
+        `,
+      }),
+    );
+
+    expect(facts.exports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "named", local: "one", exported: "one" }),
+        expect.objectContaining({ kind: "named", local: "two", exported: "two" }),
+        expect.objectContaining({ kind: "named", local: "rest", exported: "rest" }),
+        expect.objectContaining({ kind: "named", local: "first", exported: "first" }),
+        expect.objectContaining({ kind: "named", local: "second", exported: "second" }),
+      ]),
+    );
+  });
+
+  test("jsx parent ids follow child hierarchy instead of lexical containment", async () => {
+    const source = `
+      const Icon = () => <svg />;
+      export const View = () => <Panel icon={<Icon />}><Child /></Panel>;
+    `;
+    const facts = expectOk(await experimentalAnalyze({ filename: "src/view.tsx", source }));
+
+    const panel = facts.jsxTags.find((tag) => tag.name === "Panel");
+    const icon = facts.jsxTags.find((tag) => tag.name === "Icon");
+    const child = facts.jsxTags.find((tag) => tag.name === "Child");
+
+    expect(panel?.parentId).toBeUndefined();
+    expect(icon?.parentId).toBeUndefined();
+    expect(child?.parentId).toBe(panel?.id);
+
+    expect(panel?.children).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "element", tagId: child?.id })]),
+    );
+    expect(panel?.children).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "element", tagId: icon?.id })]),
+    );
+
+    for (const tag of facts.jsxTags) {
+      expect(tag.id).toBeGreaterThan(0);
+    }
+    const childElementFacts = facts.jsxTags.flatMap((tag) =>
+      tag.children.filter((childFact) => childFact.kind === "element"),
+    );
+    expect(childElementFacts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ tagId: 0 })]),
+    );
   });
 });

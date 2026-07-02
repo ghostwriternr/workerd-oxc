@@ -8,7 +8,7 @@ describe("Worker Loader example proof", () => {
   test("loads transformed output with a manual Worker Loader definition", async () => {
     const oxc = await createOxc();
     const { code } = expectOk(
-      oxc.transform({
+      await oxc.transform({
         filename: "index.ts",
         source: `
         export default {

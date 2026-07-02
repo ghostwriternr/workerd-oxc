@@ -5,9 +5,11 @@ import type {
   AnalyzeOutput,
   BindingFact,
   ExportFact,
+  ImportFact,
   JsxAttributeFact,
   JsxAttributeValueFact,
   JsxChildFact,
+  OxcDiagnostic,
   OxcResult,
   ReferenceFact,
   TransformInput,
@@ -43,9 +45,9 @@ describe("public API types", () => {
     const input: AnalyzeInput = { filename: "src/app.tsx", source: "const x = 1;" };
     const topLevel: Promise<OxcResult<AnalyzeOutput>> = experimentalAnalyze(input);
     const instance = await createOxc();
-    const syncResult: OxcResult<AnalyzeOutput> = instance.experimentalAnalyze(input);
+    const instanceResult: Promise<OxcResult<AnalyzeOutput>> = instance.experimentalAnalyze(input);
     void topLevel;
-    void syncResult;
+    void instanceResult;
     expect(true).toBe(true);
   });
   test("analyzer fact kinds expose semantic variants", () => {
@@ -66,6 +68,30 @@ describe("public API types", () => {
       declarationKind: "interface",
       span: { start: 0, end: 32 },
     };
+    const namedImport: ImportFact = {
+      source: "./mod",
+      local: "localName",
+      imported: "exportedName",
+      specifierKind: "named",
+      kind: "value",
+      span: { start: 0, end: 10 },
+      sourceSpan: { start: 12, end: 19 },
+    };
+    const defaultImport: ImportFact = {
+      source: "./mod",
+      local: "DefaultThing",
+      specifierKind: "default",
+      kind: "value",
+      span: { start: 0, end: 10 },
+      sourceSpan: { start: 12, end: 19 },
+    };
+    const allExport: ExportFact = {
+      kind: "all",
+      source: "./mod",
+      exportKind: "value",
+      span: { start: 0, end: 22 },
+    };
+    const analyzeDiagnosticPhase: OxcDiagnostic["phase"] = "analyze";
 
     // @ts-expect-error analyzer does not emit catch-all binding kind strings.
     const invalidBinding: BindingFact = { ...binding, kind: "parameter" };
@@ -78,13 +104,38 @@ describe("public API types", () => {
       // @ts-expect-error declarationKind only contains direct export declaration categories.
       declarationKind: "enum-member",
     };
+    // @ts-expect-error all exports must not have a local binding.
+    const invalidAllExport: ExportFact = {
+      kind: "all",
+      local: "x",
+      source: "./x",
+      span: { start: 0, end: 1 },
+    };
+    const invalidDefaultImport: ImportFact = {
+      source: "./mod",
+      local: "x",
+      // @ts-expect-error default imports do not use imported sentinel strings.
+      imported: "default",
+      specifierKind: "default",
+      kind: "value",
+      span: { start: 0, end: 1 },
+      sourceSpan: { start: 0, end: 1 },
+    };
 
     expect(binding.kind).toBe("param");
     expect(exportedType.exportKind).toBe("type");
+    expect(namedImport.specifierKind).toBe("named");
+    expect(defaultImport.specifierKind).toBe("default");
+    expect(allExport.kind).toBe("all");
+    expect(analyzeDiagnosticPhase).toBe("analyze");
     expect(invalidBinding.kind).toBe("parameter");
     expect(invalidExportKind.kind).toBe("interface");
     expect(invalidExportValueKind.exportKind).toBe("interface");
-    expect(invalidExportDeclarationKind.declarationKind).toBe("enum-member");
+    expect((invalidExportDeclarationKind as { declarationKind?: unknown }).declarationKind).toBe(
+      "enum-member",
+    );
+    expect(invalidAllExport.kind).toBe("all");
+    expect(invalidDefaultImport.specifierKind).toBe("default");
   });
 
   test("reference kind only exposes emitted analyzer variants", () => {

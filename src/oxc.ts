@@ -8,50 +8,78 @@ import type {
   TransformInput,
   TransformOutput,
 } from "./types.ts";
+import type { AnalyzeRuntime } from "./analyze.ts";
+import type { ParserRuntime } from "./parser.ts";
+import type { TransformRuntime } from "./transform.ts";
 
-let defaultOxcPromise: Promise<Oxc> | undefined;
+let defaultParserPromise: Promise<ParserRuntime> | undefined;
+let defaultTransformPromise: Promise<TransformRuntime> | undefined;
+let defaultAnalyzePromise: Promise<AnalyzeRuntime> | undefined;
 
 export async function createOxc(): Promise<Oxc> {
   if (arguments.length > 0) {
     throw new TypeError("createOxc() does not accept options.");
   }
 
-  const [{ createParserRuntime }, { createTransformRuntime }, { createAnalyzeRuntime }] =
-    await Promise.all([import("./parser.ts"), import("./transform.ts"), import("./analyze.ts")]);
+  let parserPromise: Promise<ParserRuntime> | undefined;
+  let transformPromise: Promise<TransformRuntime> | undefined;
+  let analyzePromise: Promise<AnalyzeRuntime> | undefined;
 
-  const parser = createParserRuntime();
-  const transformer = createTransformRuntime();
-  const analyzer = createAnalyzeRuntime();
+  const parser = () => (parserPromise ??= createParserRuntime());
+  const transformer = () => (transformPromise ??= createTransformRuntime());
+  const analyzer = () => (analyzePromise ??= createAnalyzeRuntime());
 
   return {
-    parse(input: ParseInput): OxcResult<ParseOutput> {
-      return parser.parse(input);
+    async parse(input: ParseInput): Promise<OxcResult<ParseOutput>> {
+      return (await parser()).parse(input);
     },
-    transform(input: TransformInput): OxcResult<TransformOutput> {
-      return transformer.transform(input);
+    async transform(input: TransformInput): Promise<OxcResult<TransformOutput>> {
+      return (await transformer()).transform(input);
     },
-    experimentalAnalyze(input: AnalyzeInput): OxcResult<AnalyzeOutput> {
-      return analyzer.analyze(input);
+    async experimentalAnalyze(input: AnalyzeInput): Promise<OxcResult<AnalyzeOutput>> {
+      return (await analyzer()).analyze(input);
     },
   };
 }
 
 export async function parse(input: ParseInput): Promise<OxcResult<ParseOutput>> {
-  const oxc = await defaultOxc();
-  return oxc.parse(input);
+  return (await defaultParser()).parse(input);
 }
 
 export async function transform(input: TransformInput): Promise<OxcResult<TransformOutput>> {
-  const oxc = await defaultOxc();
-  return oxc.transform(input);
+  return (await defaultTransformer()).transform(input);
 }
 
 export async function experimentalAnalyze(input: AnalyzeInput): Promise<OxcResult<AnalyzeOutput>> {
-  const oxc = await defaultOxc();
-  return oxc.experimentalAnalyze(input);
+  return (await defaultAnalyzer()).analyze(input);
 }
 
-function defaultOxc(): Promise<Oxc> {
-  defaultOxcPromise ??= createOxc();
-  return defaultOxcPromise;
+function defaultParser(): Promise<ParserRuntime> {
+  defaultParserPromise ??= createParserRuntime();
+  return defaultParserPromise;
+}
+
+function defaultTransformer(): Promise<TransformRuntime> {
+  defaultTransformPromise ??= createTransformRuntime();
+  return defaultTransformPromise;
+}
+
+function defaultAnalyzer(): Promise<AnalyzeRuntime> {
+  defaultAnalyzePromise ??= createAnalyzeRuntime();
+  return defaultAnalyzePromise;
+}
+
+async function createParserRuntime(): Promise<ParserRuntime> {
+  const mod = await import("./parser.ts");
+  return mod.createParserRuntime();
+}
+
+async function createTransformRuntime(): Promise<TransformRuntime> {
+  const mod = await import("./transform.ts");
+  return mod.createTransformRuntime();
+}
+
+async function createAnalyzeRuntime(): Promise<AnalyzeRuntime> {
+  const mod = await import("./analyze.ts");
+  return mod.createAnalyzeRuntime();
 }

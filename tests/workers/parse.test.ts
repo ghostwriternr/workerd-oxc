@@ -31,7 +31,7 @@ describe("parse", () => {
   test("createOxc exposes sync parse", async () => {
     const oxc = await createOxc();
     const { ast } = expectOk(
-      oxc.parse({ filename: "src/component.tsx", source: TSX_SOURCE, range: true }),
+      await oxc.parse({ filename: "src/component.tsx", source: TSX_SOURCE, range: true }),
     );
 
     expect(ast.type).toBe("Program");

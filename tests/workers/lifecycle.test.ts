@@ -23,17 +23,20 @@ describe("Oxc lifecycle", () => {
     const oxc = await createOxc();
 
     expectFailure(
-      oxc.parse({ filename: "src/broken.tsx", source: `export const broken = <div>;` }),
+      await oxc.parse({ filename: "src/broken.tsx", source: `export const broken = <div>;` }),
     );
     expectOk(
-      oxc.parse({ filename: "src/recovered.tsx", source: `export const value = <p>ok</p>;` }),
+      await oxc.parse({ filename: "src/recovered.tsx", source: `export const value = <p>ok</p>;` }),
     );
 
     expectFailure(
-      oxc.transform({ filename: "src/broken.tsx", source: `export const broken = <div>;` }),
+      await oxc.transform({ filename: "src/broken.tsx", source: `export const broken = <div>;` }),
     );
     expectOk(
-      oxc.transform({ filename: "src/recovered.tsx", source: `export const value = <p>ok</p>;` }),
+      await oxc.transform({
+        filename: "src/recovered.tsx",
+        source: `export const value = <p>ok</p>;`,
+      }),
     );
   });
 });

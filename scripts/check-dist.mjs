@@ -7,7 +7,7 @@ const files = [
   "dist/parser.js",
   "dist/transform.js",
   "dist/analyze.js",
-  "dist/diagnostics.js",
+  "dist/source.js",
   "dist/wasm/parser.wasm",
   "dist/wasm/transform.wasm",
   "dist/wasm/analyze.wasm",

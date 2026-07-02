@@ -977,6 +977,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
 
 [[package]]
+name = "workerd_oxc_abi"
+version = "0.0.0"
+
+[[package]]
 name = "workerd_oxc_analyze"
 version = "0.0.0"
 dependencies = [
@@ -990,6 +994,7 @@ dependencies = [
  "oxc_syntax",
  "serde",
  "serde_json",
+ "workerd_oxc_abi",
 ]
 
 [[package]]
@@ -1004,6 +1009,7 @@ dependencies = [
  "oxc_span",
  "serde",
  "serde_json",
+ "workerd_oxc_abi",
 ]
 
 [[package]]
@@ -1015,6 +1021,7 @@ dependencies = [
  "oxc_span",
  "serde",
  "serde_json",
+ "workerd_oxc_abi",
 ]
 
 [[package]]

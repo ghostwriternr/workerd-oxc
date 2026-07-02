@@ -32,7 +32,7 @@ describe("transform", () => {
   test("createOxc exposes sync transform", async () => {
     const oxc = await createOxc();
     const { code } = expectOk(
-      oxc.transform({
+      await oxc.transform({
         filename: "src/view.tsx",
         source: `export const view = <main data-kind="sync">ok</main>;`,
       }),

@@ -7,6 +7,7 @@ export type {
   BindingKind,
   ReferenceFact,
   ImportFact,
+  ImportSpecifierKind,
   ExportFact,
   ExportDeclarationKind,
   ExportKind,
