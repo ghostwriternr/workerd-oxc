@@ -131,7 +131,7 @@ interface TransformOutput {
 ### `experimentalAnalyze(input): Promise<OxcResult<AnalyzeOutput>>` / `oxc.experimentalAnalyze(input)`
 
 Returns semantic facts for a single source file: scopes, bindings, references,
-unresolved references, imports, exports, and JSX tag facts.
+unresolved references, imports, exports, and constrained JSX facts.
 
 ```ts
 interface AnalyzeInput {
@@ -166,6 +166,12 @@ See [`src/types.ts`](src/types.ts) for each fact's fields.
   export specifiers this is the syntactic `type` marker as written, because
   specifiers are not resolved. `ExportFact.declarationKind` reports the
   declaration category for direct declaration exports.
+- `JsxTagFact.span` is the opening tag span. `nameSpan` is the exact tag-name
+  span. `elementSpan` covers the whole JSX element. Non-self-closing elements
+  also include `closingSpan` and `closingNameSpan`.
+- JSX tag facts include source-order `attributes` and `children`. Attribute
+  values and child expressions expose spans only; expressions are not evaluated.
+  JSX text facts expose syntax text, not React-rendered whitespace semantics.
 - Intrinsic (lowercase) JSX tags are not bound to lexical variables. Component
   tags carry a `bindingId` only when Oxc semantic resolution resolves the tag;
   unresolved or type-only JSX names omit it.
@@ -240,8 +246,8 @@ loadable in workerd.
 file, and reports semantic facts about a file. That single-file boundary is
 deliberate.
 
-It is not a bundler, package manager, npm resolver, or a drop-in for Vite,
-esbuild, or Rolldown, and it does not:
+It is not a bundler, package manager, npm resolver, framework analyzer, or a
+drop-in for Vite, esbuild, or Rolldown, and it does not:
 
 - resolve modules or bundle
 - resolve npm / `package.json` `exports`
@@ -249,6 +255,8 @@ esbuild, or Rolldown, and it does not:
 - handle CSS, assets, or `import.meta.url`
 - rewrite dynamic `import()` / `require()`
 - check types or reason across files
+- evaluate JSX expressions or validate prop schemas
+- decide application-specific component, route, deck, or document semantics
 
 These are much larger problems, each with its own correctness burden. Folding
 them into a per-file call tends to make that call mean less, not more: callers

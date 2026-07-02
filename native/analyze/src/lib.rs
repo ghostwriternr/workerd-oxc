@@ -11,7 +11,8 @@ use oxc_ast::{
     AstKind,
     ast::{
         BindingPattern, Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier,
-        ImportOrExportKind, ModuleExportName, Statement, VariableDeclarationKind,
+        ImportOrExportKind, JSXAttributeName, JSXAttributeValue, JSXChild, JSXElement,
+        JSXElementName, JSXExpression, ModuleExportName, Statement, VariableDeclarationKind,
     },
 };
 use oxc_ast_visit::utf8_to_utf16::{Utf8ToUtf16, Utf8ToUtf16Converter};
@@ -113,11 +114,104 @@ struct ExportFactPayload {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsxTagFactPayload {
+    id: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_id: Option<usize>,
     name: String,
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     binding_id: Option<usize>,
     span: SpanPayload,
+    name_span: SpanPayload,
+    element_span: SpanPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closing_span: Option<SpanPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closing_name_span: Option<SpanPayload>,
+    self_closing: bool,
+    attributes: Vec<JsxAttributeFactPayload>,
+    children: Vec<JsxChildFactPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum JsxAttributeFactPayload {
+    #[serde(rename = "attribute")]
+    Attribute {
+        name: String,
+        name_span: SpanPayload,
+        span: SpanPayload,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<JsxAttributeValueFactPayload>,
+    },
+    #[serde(rename = "spread")]
+    Spread {
+        span: SpanPayload,
+        expression_span: SpanPayload,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum JsxAttributeValueFactPayload {
+    #[serde(rename = "string")]
+    String { value: String, span: SpanPayload },
+    #[serde(rename = "expression")]
+    Expression {
+        span: SpanPayload,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expression_span: Option<SpanPayload>,
+    },
+    #[serde(rename = "element")]
+    Element {
+        span: SpanPayload,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tag_id: Option<usize>,
+    },
+    #[serde(rename = "fragment")]
+    Fragment { span: SpanPayload },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum JsxChildFactPayload {
+    #[serde(rename = "text")]
+    Text {
+        span: SpanPayload,
+        raw: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
+    #[serde(rename = "element")]
+    Element { span: SpanPayload, tag_id: usize },
+    #[serde(rename = "fragment")]
+    Fragment {
+        span: SpanPayload,
+        children: Vec<JsxChildFactPayload>,
+    },
+    #[serde(rename = "expression")]
+    Expression {
+        span: SpanPayload,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expression_span: Option<SpanPayload>,
+    },
+    #[serde(rename = "spread")]
+    Spread {
+        span: SpanPayload,
+        expression_span: SpanPayload,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -758,62 +852,34 @@ unsafe fn analyze_inner(
     }
 
     // 5. JSX Tags
-    let mut jsx_tags = Vec::new();
-    for node in semantic.nodes().iter() {
-        if let oxc_ast::AstKind::JSXOpeningElement(elem) = node.kind() {
-            let span = span_converter.convert(elem.span);
+    let mut jsx_elements = semantic
+        .nodes()
+        .iter()
+        .filter_map(|node| match node.kind() {
+            AstKind::JSXElement(element) => Some(element),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    jsx_elements.sort_by_key(|element| (element.span.start, element.span.end));
 
-            match &elem.name {
-                oxc_ast::ast::JSXElementName::Identifier(id) => {
-                    let name = id.name.to_string();
-                    jsx_tags.push(JsxTagFactPayload {
-                        name,
-                        kind: "identifier",
-                        binding_id: None,
-                        span,
-                    });
-                }
-                oxc_ast::ast::JSXElementName::IdentifierReference(id) => {
-                    let name = id.name.to_string();
-                    let binding_id = binding_id_for_identifier(scoping, id);
-                    jsx_tags.push(JsxTagFactPayload {
-                        name,
-                        kind: "identifier",
-                        binding_id,
-                        span,
-                    });
-                }
-                oxc_ast::ast::JSXElementName::NamespacedName(ns) => {
-                    let name = format!("{}:{}", ns.namespace.name, ns.name.name);
-                    jsx_tags.push(JsxTagFactPayload {
-                        name,
-                        kind: "namespaced",
-                        binding_id: None,
-                        span,
-                    });
-                }
-                oxc_ast::ast::JSXElementName::MemberExpression(mem) => {
-                    let name = get_jsx_member_expr_name(mem);
-                    let binding_id = mem
-                        .get_identifier()
-                        .and_then(|id| binding_id_for_identifier(scoping, id));
-                    jsx_tags.push(JsxTagFactPayload {
-                        name,
-                        kind: "member",
-                        binding_id,
-                        span,
-                    });
-                }
-                oxc_ast::ast::JSXElementName::ThisExpression(_) => {
-                    jsx_tags.push(JsxTagFactPayload {
-                        name: "this".to_string(),
-                        kind: "identifier",
-                        binding_id: None,
-                        span,
-                    });
-                }
-            }
-        }
+    let jsx_element_id_map = jsx_elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| ((element.span.start, element.span.end), index + 1))
+        .collect::<BTreeMap<_, _>>();
+    let jsx_parent_ids = jsx_parent_ids(&jsx_elements);
+
+    let mut jsx_tags = Vec::new();
+    for (index, element) in jsx_elements.iter().enumerate() {
+        let id = index + 1;
+        jsx_tags.push(jsx_tag_fact(
+            element,
+            id,
+            jsx_parent_ids[index],
+            &jsx_element_id_map,
+            scoping,
+            &mut span_converter,
+        ));
     }
 
     serde_json::to_vec(&AnalyzeSuccessPayload {
@@ -926,6 +992,200 @@ pub extern "C" fn free_result(handle: u32) {
     RESULTS.with(|results| {
         results.borrow_mut().remove(&handle);
     });
+}
+
+fn jsx_tag_fact(
+    element: &JSXElement<'_>,
+    id: usize,
+    parent_id: Option<usize>,
+    element_id_map: &BTreeMap<(u32, u32), usize>,
+    scoping: &oxc_semantic::Scoping,
+    span_converter: &mut SpanConverter<'_>,
+) -> JsxTagFactPayload {
+    let opening = &element.opening_element;
+    let (name, kind, binding_id) = jsx_element_name(&opening.name, scoping);
+    let closing = element.closing_element.as_ref();
+
+    JsxTagFactPayload {
+        id,
+        parent_id,
+        name,
+        kind,
+        binding_id,
+        span: span_converter.convert(opening.span),
+        name_span: span_converter.convert(opening.name.span()),
+        element_span: span_converter.convert(element.span),
+        closing_span: closing.map(|closing| span_converter.convert(closing.span)),
+        closing_name_span: closing.map(|closing| span_converter.convert(closing.name.span())),
+        self_closing: closing.is_none(),
+        attributes: opening
+            .attributes
+            .iter()
+            .map(|attribute| jsx_attribute_fact(attribute, element_id_map, span_converter))
+            .collect(),
+        children: jsx_child_facts(&element.children, element_id_map, span_converter),
+    }
+}
+
+fn jsx_element_name(
+    name: &JSXElementName<'_>,
+    scoping: &oxc_semantic::Scoping,
+) -> (String, &'static str, Option<usize>) {
+    match name {
+        JSXElementName::Identifier(id) => (id.name.to_string(), "identifier", None),
+        JSXElementName::IdentifierReference(id) => (
+            id.name.to_string(),
+            "identifier",
+            binding_id_for_identifier(scoping, id),
+        ),
+        JSXElementName::NamespacedName(ns) => (
+            format!("{}:{}", ns.namespace.name, ns.name.name),
+            "namespaced",
+            None,
+        ),
+        JSXElementName::MemberExpression(mem) => (
+            get_jsx_member_expr_name(mem),
+            "member",
+            mem.get_identifier()
+                .and_then(|id| binding_id_for_identifier(scoping, id)),
+        ),
+        JSXElementName::ThisExpression(_) => ("this".to_string(), "identifier", None),
+    }
+}
+
+fn jsx_parent_ids(elements: &[&JSXElement<'_>]) -> Vec<Option<usize>> {
+    let mut parent_ids = Vec::with_capacity(elements.len());
+    let mut open_elements: Vec<(u32, usize)> = Vec::new();
+
+    for (index, element) in elements.iter().enumerate() {
+        while open_elements
+            .last()
+            .is_some_and(|(end, _)| element.span.start >= *end)
+        {
+            open_elements.pop();
+        }
+
+        parent_ids.push(open_elements.last().map(|(_, id)| *id));
+        open_elements.push((element.span.end, index + 1));
+    }
+
+    parent_ids
+}
+
+fn jsx_attribute_fact(
+    attribute: &oxc_ast::ast::JSXAttributeItem<'_>,
+    element_id_map: &BTreeMap<(u32, u32), usize>,
+    span_converter: &mut SpanConverter<'_>,
+) -> JsxAttributeFactPayload {
+    match attribute {
+        oxc_ast::ast::JSXAttributeItem::Attribute(attribute) => {
+            let (name, name_span) = jsx_attribute_name(&attribute.name);
+            JsxAttributeFactPayload::Attribute {
+                name,
+                name_span: span_converter.convert(name_span),
+                span: span_converter.convert(attribute.span),
+                value: attribute
+                    .value
+                    .as_ref()
+                    .map(|value| jsx_attribute_value_fact(value, element_id_map, span_converter)),
+            }
+        }
+        oxc_ast::ast::JSXAttributeItem::SpreadAttribute(spread) => {
+            JsxAttributeFactPayload::Spread {
+                span: span_converter.convert(spread.span),
+                expression_span: span_converter.convert(spread.argument.span()),
+            }
+        }
+    }
+}
+
+fn jsx_attribute_name(name: &JSXAttributeName<'_>) -> (String, Span) {
+    match name {
+        JSXAttributeName::Identifier(id) => (id.name.to_string(), id.span),
+        JSXAttributeName::NamespacedName(ns) => {
+            (format!("{}:{}", ns.namespace.name, ns.name.name), ns.span)
+        }
+    }
+}
+
+fn jsx_attribute_value_fact(
+    value: &JSXAttributeValue<'_>,
+    element_id_map: &BTreeMap<(u32, u32), usize>,
+    span_converter: &mut SpanConverter<'_>,
+) -> JsxAttributeValueFactPayload {
+    match value {
+        JSXAttributeValue::StringLiteral(literal) => JsxAttributeValueFactPayload::String {
+            value: literal.value.to_string(),
+            span: span_converter.convert(literal.span),
+        },
+        JSXAttributeValue::ExpressionContainer(container) => {
+            JsxAttributeValueFactPayload::Expression {
+                span: span_converter.convert(container.span),
+                expression_span: jsx_expression_span(&container.expression)
+                    .map(|span| span_converter.convert(span)),
+            }
+        }
+        JSXAttributeValue::Element(element) => JsxAttributeValueFactPayload::Element {
+            span: span_converter.convert(element.span),
+            tag_id: jsx_tag_id(element.span, element_id_map),
+        },
+        JSXAttributeValue::Fragment(fragment) => JsxAttributeValueFactPayload::Fragment {
+            span: span_converter.convert(fragment.span),
+        },
+    }
+}
+
+fn jsx_child_facts(
+    children: &[JSXChild<'_>],
+    element_id_map: &BTreeMap<(u32, u32), usize>,
+    span_converter: &mut SpanConverter<'_>,
+) -> Vec<JsxChildFactPayload> {
+    children
+        .iter()
+        .map(|child| jsx_child_fact(child, element_id_map, span_converter))
+        .collect()
+}
+
+fn jsx_child_fact(
+    child: &JSXChild<'_>,
+    element_id_map: &BTreeMap<(u32, u32), usize>,
+    span_converter: &mut SpanConverter<'_>,
+) -> JsxChildFactPayload {
+    match child {
+        JSXChild::Text(text) => JsxChildFactPayload::Text {
+            span: span_converter.convert(text.span),
+            raw: text.raw.as_ref().unwrap_or(&text.value).to_string(),
+            value: Some(text.value.to_string()),
+        },
+        JSXChild::Element(element) => JsxChildFactPayload::Element {
+            span: span_converter.convert(element.span),
+            tag_id: jsx_tag_id(element.span, element_id_map).unwrap_or(0),
+        },
+        JSXChild::Fragment(fragment) => JsxChildFactPayload::Fragment {
+            span: span_converter.convert(fragment.span),
+            children: jsx_child_facts(&fragment.children, element_id_map, span_converter),
+        },
+        JSXChild::ExpressionContainer(container) => JsxChildFactPayload::Expression {
+            span: span_converter.convert(container.span),
+            expression_span: jsx_expression_span(&container.expression)
+                .map(|span| span_converter.convert(span)),
+        },
+        JSXChild::Spread(spread) => JsxChildFactPayload::Spread {
+            span: span_converter.convert(spread.span),
+            expression_span: span_converter.convert(spread.expression.span()),
+        },
+    }
+}
+
+fn jsx_expression_span(expression: &JSXExpression<'_>) -> Option<Span> {
+    match expression {
+        JSXExpression::EmptyExpression(_) => None,
+        _ => Some(expression.span()),
+    }
+}
+
+fn jsx_tag_id(span: Span, element_id_map: &BTreeMap<(u32, u32), usize>) -> Option<usize> {
+    element_id_map.get(&(span.start, span.end)).copied()
 }
 
 fn binding_id_for_identifier(

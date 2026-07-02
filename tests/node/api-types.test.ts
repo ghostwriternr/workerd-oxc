@@ -5,6 +5,9 @@ import type {
   AnalyzeOutput,
   BindingFact,
   ExportFact,
+  JsxAttributeFact,
+  JsxAttributeValueFact,
+  JsxChildFact,
   OxcResult,
   ReferenceFact,
   TransformInput,
@@ -104,6 +107,55 @@ describe("public API types", () => {
     expect(typeReference.kind).toBe("type");
     expect(jsxReference.kind).toBe("jsx");
     expect(namespaceReference.kind).toBe("namespace");
+  });
+
+  test("jsx analyzer fact types expose constrained variants", () => {
+    const stringValue: JsxAttributeValueFact = {
+      kind: "string",
+      value: "wide",
+      span: { start: 12, end: 18 },
+    };
+    const expressionValue: JsxAttributeValueFact = {
+      kind: "expression",
+      span: { start: 20, end: 25 },
+      expressionSpan: { start: 21, end: 24 },
+    };
+    const attribute: JsxAttributeFact = {
+      kind: "attribute",
+      name: "size",
+      nameSpan: { start: 7, end: 11 },
+      span: { start: 7, end: 18 },
+      value: stringValue,
+    };
+    const spread: JsxAttributeFact = {
+      kind: "spread",
+      span: { start: 26, end: 36 },
+      expressionSpan: { start: 30, end: 35 },
+    };
+    const child: JsxChildFact = {
+      kind: "element",
+      span: { start: 40, end: 49 },
+      tagId: 2,
+    };
+
+    const invalidValue: JsxAttributeValueFact = {
+      // @ts-expect-error analyzer does not expose evaluated numeric attribute values.
+      kind: "number",
+      value: "2",
+      span: { start: 0, end: 1 },
+    };
+    // @ts-expect-error ordinary attributes require a name.
+    const invalidAttribute: JsxAttributeFact = { kind: "attribute", span: { start: 0, end: 1 } };
+    // @ts-expect-error element child facts link to a JSX tag id.
+    const invalidChild: JsxChildFact = { kind: "element", span: { start: 0, end: 1 } };
+
+    expect(attribute.value).toBe(stringValue);
+    expect(expressionValue.expressionSpan).toEqual({ start: 21, end: 24 });
+    expect(spread.kind).toBe("spread");
+    expect(child.tagId).toBe(2);
+    expect(invalidValue.kind).toBe("number");
+    expect(invalidAttribute.kind).toBe("attribute");
+    expect(invalidChild.kind).toBe("element");
   });
 
   test("transform target is a single string", () => {

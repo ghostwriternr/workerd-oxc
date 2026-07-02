@@ -179,8 +179,44 @@ export interface ExportFact {
 }
 
 export interface JsxTagFact {
+  id: number;
+  parentId?: number;
   name: string;
   kind: "identifier" | "member" | "namespaced";
   bindingId?: number;
   span: OxcSourceSpan;
+  nameSpan: OxcSourceSpan;
+  elementSpan: OxcSourceSpan;
+  closingSpan?: OxcSourceSpan;
+  closingNameSpan?: OxcSourceSpan;
+  selfClosing: boolean;
+  attributes: JsxAttributeFact[];
+  children: JsxChildFact[];
 }
+
+export type JsxAttributeFact =
+  | {
+      kind: "attribute";
+      name: string;
+      nameSpan: OxcSourceSpan;
+      span: OxcSourceSpan;
+      value?: JsxAttributeValueFact;
+    }
+  | {
+      kind: "spread";
+      span: OxcSourceSpan;
+      expressionSpan: OxcSourceSpan;
+    };
+
+export type JsxAttributeValueFact =
+  | { kind: "string"; value: string; span: OxcSourceSpan }
+  | { kind: "expression"; span: OxcSourceSpan; expressionSpan?: OxcSourceSpan }
+  | { kind: "element"; span: OxcSourceSpan; tagId?: number }
+  | { kind: "fragment"; span: OxcSourceSpan };
+
+export type JsxChildFact =
+  | { kind: "text"; span: OxcSourceSpan; raw: string; value?: string }
+  | { kind: "element"; span: OxcSourceSpan; tagId: number }
+  | { kind: "fragment"; span: OxcSourceSpan; children: JsxChildFact[] }
+  | { kind: "expression"; span: OxcSourceSpan; expressionSpan?: OxcSourceSpan }
+  | { kind: "spread"; span: OxcSourceSpan; expressionSpan: OxcSourceSpan };
