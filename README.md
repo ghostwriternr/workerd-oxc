@@ -209,6 +209,25 @@ npm run build:wasm
 
 This rebuilds `src/wasm/parser.wasm` and `src/wasm/transform.wasm`.
 
+## Wasm artifacts
+
+The parser and transformer artifacts are committed on purpose. Cloudflare Workers import `.wasm` files as static `WebAssembly.Module` objects, so consumers need those files in the package; fetching or compiling Wasm bytes at runtime is not the model here.
+
+Inspect the current artifacts with:
+
+```sh
+npm run wasm:info
+```
+
+That prints size, SHA-256, imports, and ABI exports for each artifact. `npm run wasm:check` enforces the invariants this package relies on: both artifacts must have zero imports and must export the expected pointer/length/result ABI functions.
+
+CI tests artifacts in two phases:
+
+1. test the committed artifacts before rebuilding, so the checked-in package state is known to work;
+2. rebuild artifacts from Rust source on the CI runner and run the full check suite again.
+
+The project does not currently require byte-identical Wasm output across host operating systems or CPU architectures. We have seen macOS/aarch64 and Ubuntu/x64 produce different bytes from the same Rust source and lockfile. Releases should rebuild and pack on the release host rather than relying on cross-host byte identity.
+
 ## Development
 
 The canonical check is:
@@ -217,7 +236,7 @@ The canonical check is:
 npm run check
 ```
 
-That runs Oxlint, Oxfmt, Rust formatting checks, TypeScript, node tests, and workerd tests.
+That runs Oxlint, Oxfmt, Rust formatting checks, Wasm artifact checks, package-shape checks, TypeScript, node tests, and workerd tests.
 
 Useful commands:
 
@@ -225,6 +244,8 @@ Useful commands:
 npm run lint        # Oxlint
 npm run fmt:check   # Oxfmt + rustfmt check
 npm run fmt         # Oxfmt + rustfmt write
+npm run wasm:info   # artifact size/hash/import/export summary
+npm run wasm:check  # artifact ABI/import guard
 npm test            # typecheck + node + workerd tests
 npm run test:node
 npm run test:workers
