@@ -1,12 +1,7 @@
 # workerd-oxc
 
 Run the [Oxc](https://oxc.rs) parser and transformer inside Cloudflare Workers.
-
-Workers can't compile WebAssembly at runtime — no `WebAssembly.compile`, no
-fetching `.wasm` over the network, no threads. That rules out the stock Oxc
-WASI/browser builds. `workerd-oxc` ships Oxc as static, zero-import
-`WebAssembly.Module` artifacts with a tiny hand-written ABI, so parsing and
-transforming TS/TSX works in a Worker with nothing else wired up.
+An experimental per-file semantic analyzer is also included.
 
 ```ts
 import { transform } from "workerd-oxc";
@@ -28,13 +23,16 @@ if (result.ok) {
 npm install workerd-oxc
 ```
 
-The npm package includes prebuilt `.wasm` artifacts, so consumers do not need a Rust toolchain. Source checkouts build those artifacts from Rust; see [Building](#building-from-source).
+The npm package ships prebuilt `.wasm` artifacts, so consumers do not need a
+Rust toolchain. Building from a source checkout does; see
+[Building from source](#building-from-source).
 
-## Usage
+## Getting started
 
-There are two ways in. Both do the same work.
+There are two ways in; both do the same work.
 
-**One-shot functions** lazily initialize a shared instance on first call:
+Call the one-shot functions when you parse or transform occasionally. They
+lazily initialize a shared instance on first call and return a promise:
 
 ```ts
 import { parse, transform } from "workerd-oxc";
@@ -43,8 +41,8 @@ const parsed = await parse({ filename: "app.tsx", source });
 const transformed = await transform({ filename: "app.tsx", source });
 ```
 
-**An explicit instance** pays initialization once, then runs synchronously.
-Prefer this in a hot path:
+Create an explicit instance when you work in a hot path. It pays
+initialization once, then runs synchronously:
 
 ```ts
 import { createOxc } from "workerd-oxc";
@@ -55,15 +53,28 @@ oxc.parse({ filename: "app.tsx", source });
 oxc.transform({ filename: "app.tsx", source });
 ```
 
-Instance methods are synchronous because, once the module is instantiated, a
-parse or transform is a plain CPU-bound Wasm call.
+Every call returns a result object rather than throwing on expected failures.
+Gate on `result.ok`:
+
+```ts
+const result = await transform({ filename: "app.tsx", source });
+
+if (result.ok) {
+  deploy(result.value.code);
+} else {
+  report(result.diagnostics);
+}
+```
 
 ## API
 
 ### `createOxc(): Promise<Oxc>`
 
-Instantiates the parser and transformer and returns an instance with
-synchronous `parse` and `transform` methods.
+Instantiates the Wasm modules and returns an instance with synchronous
+`parse`, `transform`, and `experimentalAnalyze` methods. Takes no arguments.
+
+Instance methods are synchronous because, once the module is instantiated,
+each call is a plain CPU-bound Wasm call.
 
 ### `parse(input): Promise<OxcResult<ParseOutput>>` / `oxc.parse(input)`
 
@@ -91,8 +102,8 @@ Oxc's own JS wrapper.
 
 ### `transform(input): Promise<OxcResult<TransformOutput>>` / `oxc.transform(input)`
 
-Strips TypeScript types and lowers JSX for a single file. It does not resolve
-imports or bundle — see [Scope](#scope).
+Strips TypeScript types and lowers JSX for a single file. Import specifiers are
+left untouched.
 
 ```ts
 interface TransformInput {
@@ -119,27 +130,44 @@ interface TransformOutput {
 
 ### `experimentalAnalyze(input): Promise<OxcResult<AnalyzeOutput>>` / `oxc.experimentalAnalyze(input)`
 
-Experimental. Builds compact per-file semantic facts from Oxc: scopes, bindings, references, unresolved references, imports, exports, and JSX tag facts. This is not a project graph, resolver, linter, type checker, or bundler. IDs are stable only within one result object.
+Returns semantic facts for a single source file: scopes, bindings, references,
+unresolved references, imports, exports, and JSX tag facts.
 
 ```ts
-const result = await experimentalAnalyze({ filename: "src/app.tsx", source });
-if (result.ok) {
-  result.value.bindings;
-  result.value.references;
-  result.value.jsxTags;
+interface AnalyzeInput {
+  filename: string;
+  source: string;
+  lang?: "js" | "jsx" | "ts" | "tsx"; // default: inferred from filename
+  sourceType?: "module" | "script"; // default: "module"
+}
+
+interface AnalyzeOutput {
+  scopes: ScopeFact[];
+  bindings: BindingFact[];
+  references: ReferenceFact[];
+  unresolved: ReferenceFact[];
+  imports: ImportFact[];
+  exports: ExportFact[];
+  jsxTags: JsxTagFact[];
 }
 ```
 
-Caveats:
+See [`src/types.ts`](src/types.ts) for each fact's fields.
 
-- The experimental API shape may change in minor versions before stabilization.
-- Facts are per-file only.
-- Imports are recorded, not resolved.
-- Spans are JS UTF-16 offsets.
+- Facts describe one file. `imports` and `exports` are recorded as written;
+  specifiers are not resolved.
+- Spans are JavaScript UTF-16 string offsets into `source`.
+- `id`, `scopeId`, and `bindingId` are stable only within a single result.
+- Intrinsic (lowercase) JSX tags are not bound to lexical variables; only
+  component tags carry a `bindingId`.
+- Absent optional fields are omitted, not set to `null`.
+- This API is experimental; the fact shape may change in a minor version
+  before it stabilizes. For why the analyzer stops at per-file facts, see
+  [Scope and non-goals](#scope-and-non-goals).
 
-### Results
+### `OxcResult<T>`
 
-Everything returns a discriminated result. Expected failures — syntax errors,
+Every call returns a discriminated result. Expected failures — syntax errors,
 invalid transforms — are diagnostics, not thrown exceptions.
 
 ```ts
@@ -151,7 +179,7 @@ type OxcResult<T> =
 A successful result can still carry warnings, so gate on `ok`, not on
 `diagnostics.length`.
 
-### Diagnostics
+### `OxcDiagnostic`
 
 ```ts
 interface OxcDiagnostic {
@@ -176,34 +204,54 @@ your Worker
   └─ workerd-oxc
        ├─ dist/wasm/parser.wasm      (wasm32-unknown-unknown, 0 imports)
        ├─ dist/wasm/transform.wasm   (wasm32-unknown-unknown, 0 imports)
+       ├─ dist/wasm/analyze.wasm     (wasm32-unknown-unknown, 0 imports)
        └─ a small pointer/length/result ABI in JavaScript
 ```
 
+Workers can't compile WebAssembly at runtime — no `WebAssembly.compile`, no
+fetching `.wasm` over the network, no threads. That rules out the stock Oxc
+WASI and browser builds, which expect one or more of those. `workerd-oxc`
+sidesteps the problem by shipping Oxc as static, zero-import
+`WebAssembly.Module` artifacts.
+
 The `.wasm` files are Rust crates ([`native/`](native)) that wrap the Oxc
-parser and transformer and expose a handful of C-ABI functions
-(`alloc`, `parse`/`transform`, `result_ptr`, `free_result`, …). The TypeScript
-host writes UTF-8 into Wasm memory, calls in, and reads a JSON result back out.
+parser, transformer, and semantic analyzer and expose a handful of C-ABI
+functions (`alloc`, `parse`/`transform`/`analyze`, `result_ptr`,
+`free_result`, …). The TypeScript host writes UTF-8 into Wasm memory, calls in,
+and reads a JSON result back out.
 
 There is no N-API, no emnapi, no WASI, no runtime `WebAssembly.compile`, no
 browser `Worker`, and no shared memory. The modules import nothing —
-`WebAssembly.Module.imports(module)` is `[]` — which is what makes them loadable
-in workerd.
+`WebAssembly.Module.imports(module)` is `[]` — which is what makes them
+loadable in workerd.
 
-## Scope
+## Scope and non-goals
 
-This is a parser and a transformer, nothing more.
+`workerd-oxc` works on one file at a time. It parses a file, transforms a
+file, and reports semantic facts about a file. That single-file boundary is
+deliberate.
 
-It is **not** a bundler, package manager, npm resolver, or a drop-in for Vite,
-esbuild, or Rolldown. It transforms one file at a time and leaves import
-specifiers untouched. Out of scope, by design:
+It is not a bundler, package manager, npm resolver, or a drop-in for Vite,
+esbuild, or Rolldown, and it does not:
 
-- module resolution and bundling
-- npm / `package.json` `exports` resolution
-- CJS/ESM interop shims
-- CSS, assets, and `import.meta.url` handling
-- dynamic `import()` / `require()` rewriting
+- resolve modules or bundle
+- resolve npm / `package.json` `exports`
+- shim CJS/ESM interop
+- handle CSS, assets, or `import.meta.url`
+- rewrite dynamic `import()` / `require()`
+- check types or reason across files
 
-If you need any of that, reach for a real bundler.
+These are much larger problems, each with its own correctness burden. Folding
+them into a per-file call tends to make that call mean less, not more: callers
+can no longer tell whether a reported import was resolved, whether a type was
+checked, or whether a fact holds for the file or the whole project. Keeping the
+boundary sharp keeps the results trustworthy.
+
+None of this is ruled out forever. Project-level or type-aware analysis could
+be worth adding later — but as a separate API with its own contract, not as
+hidden behaviour that `experimentalAnalyze` grows into. If you need resolution
+or bundling today, reach for a real bundler; if you need cross-file analysis
+today, this package is not it yet.
 
 ## Cloudflare Worker Loader
 
@@ -214,51 +262,46 @@ Loader wiring is left to you — it is not part of this package's API.
 
 ## Building from source
 
-Requires Rust 1.95.0 with the `wasm32-unknown-unknown` target. The repo includes `rust-toolchain.toml`, so `rustup` will install the right toolchain/target automatically:
+Requires Rust 1.95.0 with the `wasm32-unknown-unknown` target. The repo
+includes `rust-toolchain.toml`, so `rustup` installs the right toolchain and
+target automatically.
 
 ```sh
-npm run build:wasm
+npm run build:wasm   # generates src/wasm/{parser,transform,analyze}.wasm
+npm run build        # build:wasm, then copies artifacts into dist/wasm/
 ```
 
-`npm run build:wasm` generates `src/wasm/parser.wasm` and `src/wasm/transform.wasm`. `npm run build` runs that step and then copies the artifacts into `dist/wasm/` for packaging.
-
-## Wasm artifacts
-
-The parser and transformer `.wasm` files are generated from the Rust crates and shipped in the npm package because Workers load them as static `WebAssembly.Module` imports. Runtime consumers should not need Rust or a Wasm build step.
-
-For artifact details:
+The artifacts are shipped in the npm package because Workers load them as
+static `WebAssembly.Module` imports; runtime consumers never build them.
+Inspect or verify them with:
 
 ```sh
-npm run wasm:info
-npm run wasm:check
+npm run wasm:info    # size / hash / imports / exports per artifact
+npm run wasm:check   # asserts zero imports and the expected ABI exports
 ```
 
-`wasm:check` verifies the two properties this package depends on: zero imports and the expected ABI exports.
+## Contributing
 
-## Development
-
-The canonical check is:
+The canonical check runs everything CI does:
 
 ```sh
 npm run check
 ```
 
-That runs Oxlint, Oxfmt, Rust formatting checks, Wasm artifact checks, package-shape checks, TypeScript, node tests, and workerd tests.
-
-Useful commands:
+That is Oxlint, Oxfmt, Rust formatting, Wasm artifact checks, package-shape
+checks, TypeScript, and the node and workerd test suites. Individual steps:
 
 ```sh
-npm run lint        # Oxlint
-npm run fmt:check   # Oxfmt + rustfmt check
-npm run fmt         # Oxfmt + rustfmt write
-npm run wasm:info   # artifact size/hash/import/export summary
-npm run wasm:check  # artifact ABI/import guard
-npm test            # typecheck + node + workerd tests
+npm run lint          # Oxlint
+npm run fmt           # Oxfmt + rustfmt (write)
+npm run fmt:check     # Oxfmt + rustfmt (check)
+npm test              # typecheck + node + workerd tests
 npm run test:node
 npm run test:workers
 ```
 
-If you use [`just`](https://github.com/casey/just), the repo also has a thin command facade:
+If you use [`just`](https://github.com/casey/just), a thin command facade
+wraps the common tasks:
 
 ```sh
 just check
