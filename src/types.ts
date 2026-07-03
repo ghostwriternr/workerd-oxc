@@ -241,13 +241,41 @@ export type JsxAttributeFact =
 
 export type JsxAttributeValueFact =
   | { kind: "string"; value: string; span: OxcSourceSpan }
-  | { kind: "expression"; span: OxcSourceSpan; expressionSpan?: OxcSourceSpan }
+  | {
+      kind: "expression";
+      span: OxcSourceSpan;
+      expressionSpan?: OxcSourceSpan;
+      literal?: LiteralValueFact;
+    }
   | { kind: "element"; span: OxcSourceSpan; tagId?: number }
   | { kind: "fragment"; span: OxcSourceSpan };
+
+/**
+ * A statically materialized, JSON-shaped literal value extracted structurally
+ * from an expression (no evaluation, no scope resolution). Present only when the
+ * expression is already a literal in the supported grammar.
+ */
+export type LiteralValueFact =
+  | { type: "string"; value: string }
+  | { type: "number"; value: number }
+  | { type: "boolean"; value: boolean }
+  | { type: "null" }
+  | { type: "array"; elements: LiteralValueFact[] }
+  | { type: "object"; properties: LiteralPropertyFact[] };
+
+export interface LiteralPropertyFact {
+  key: string;
+  value: LiteralValueFact;
+}
 
 export type JsxChildFact =
   | { kind: "text"; span: OxcSourceSpan; raw: string; value?: string }
   | { kind: "element"; span: OxcSourceSpan; tagId: number }
   | { kind: "fragment"; span: OxcSourceSpan; children: JsxChildFact[] }
-  | { kind: "expression"; span: OxcSourceSpan; expressionSpan?: OxcSourceSpan }
+  | {
+      kind: "expression";
+      span: OxcSourceSpan;
+      expressionSpan?: OxcSourceSpan;
+      literal?: LiteralValueFact;
+    }
   | { kind: "spread"; span: OxcSourceSpan; expressionSpan: OxcSourceSpan };

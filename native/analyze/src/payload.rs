@@ -133,11 +133,45 @@ pub(crate) enum JsxAttributeValueFactPayload {
         span: SpanPayload,
         #[serde(skip_serializing_if = "Option::is_none")]
         expression_span: Option<SpanPayload>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        literal: Option<LiteralValueFactPayload>,
     },
     #[serde(rename = "element")]
     Element { span: SpanPayload, tag_id: usize },
     #[serde(rename = "fragment")]
     Fragment { span: SpanPayload },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum LiteralValueFactPayload {
+    String {
+        value: String,
+    },
+    Number {
+        value: f64,
+    },
+    Boolean {
+        value: bool,
+    },
+    Null,
+    Array {
+        elements: Vec<LiteralValueFactPayload>,
+    },
+    Object {
+        properties: Vec<LiteralPropertyFactPayload>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiteralPropertyFactPayload {
+    pub(crate) key: String,
+    pub(crate) value: LiteralValueFactPayload,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,6 +200,8 @@ pub(crate) enum JsxChildFactPayload {
         span: SpanPayload,
         #[serde(skip_serializing_if = "Option::is_none")]
         expression_span: Option<SpanPayload>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        literal: Option<LiteralValueFactPayload>,
     },
     #[serde(rename = "spread")]
     Spread {

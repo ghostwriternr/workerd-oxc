@@ -24,6 +24,7 @@ const expectedFiles = [
   "package/native/analyze/src/facts/bindings.rs",
   "package/native/analyze/src/facts/imports_exports.rs",
   "package/native/analyze/src/facts/jsx.rs",
+  "package/native/analyze/src/facts/literal.rs",
   "package/native/analyze/src/facts/mod.rs",
   "package/native/analyze/src/facts/references.rs",
   "package/native/analyze/src/facts/scopes.rs",

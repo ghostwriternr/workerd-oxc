@@ -152,13 +152,11 @@ function isJsxAttribute(value: unknown): boolean {
 }
 
 function isJsxAttributeValue(value: unknown): boolean {
-  return (
-    isObject(value) &&
-    (value.kind === "string" ||
-      value.kind === "expression" ||
-      value.kind === "element" ||
-      value.kind === "fragment")
-  );
+  if (!isObject(value)) return false;
+  if (value.kind === "expression") {
+    return value.literal === undefined || isLiteralValueFact(value.literal);
+  }
+  return value.kind === "string" || value.kind === "element" || value.kind === "fragment";
 }
 
 function isJsxChild(value: unknown): boolean {
@@ -166,14 +164,43 @@ function isJsxChild(value: unknown): boolean {
   switch (value.kind) {
     case "text":
     case "element":
-    case "expression":
     case "spread":
       return true;
+    case "expression":
+      return value.literal === undefined || isLiteralValueFact(value.literal);
     case "fragment":
       return Array.isArray(value.children) && value.children.every(isJsxChild);
     default:
       return false;
   }
+}
+
+function isLiteralValueFact(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  switch (value.type) {
+    case "string":
+      return typeof value.value === "string";
+    case "number":
+      return (
+        typeof value.value === "number" &&
+        Number.isFinite(value.value) &&
+        !Object.is(value.value, -0)
+      );
+    case "boolean":
+      return typeof value.value === "boolean";
+    case "null":
+      return true;
+    case "array":
+      return Array.isArray(value.elements) && value.elements.every(isLiteralValueFact);
+    case "object":
+      return Array.isArray(value.properties) && value.properties.every(isLiteralProperty);
+    default:
+      return false;
+  }
+}
+
+function isLiteralProperty(value: unknown): boolean {
+  return isObject(value) && typeof value.key === "string" && isLiteralValueFact(value.value);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

@@ -16,6 +16,8 @@ export type {
   JsxAttributeValueFact,
   JsxChildFact,
   JsxTagFact,
+  LiteralPropertyFact,
+  LiteralValueFact,
   Oxc,
   OxcDiagnostic,
   OxcJsxOptions,

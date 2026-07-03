@@ -6,6 +6,7 @@ use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, Span};
 
 use super::FactContext;
+use super::literal::literal_from_jsx_expression;
 use crate::{
     payload::{
         JsxAttributeFactPayload, JsxAttributeValueFactPayload, JsxChildFactPayload,
@@ -120,6 +121,7 @@ impl<'a, 'b> JsxFactBuilder<'a, 'b> {
                     span: self.spans.convert(container.span),
                     expression_span: jsx_expression_span(&container.expression)
                         .map(|span| self.spans.convert(span)),
+                    literal: literal_from_jsx_expression(&container.expression),
                 }
             }
             JSXAttributeValue::Element(element) => {
@@ -173,6 +175,7 @@ impl<'a, 'b> JsxFactBuilder<'a, 'b> {
                     span: self.spans.convert(container.span),
                     expression_span: jsx_expression_span(&container.expression)
                         .map(|span| self.spans.convert(span)),
+                    literal: literal_from_jsx_expression(&container.expression),
                 }
             }
             JSXChild::Spread(spread) => {

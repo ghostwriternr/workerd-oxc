@@ -12,6 +12,7 @@ use crate::{
 mod bindings;
 mod imports_exports;
 mod jsx;
+mod literal;
 mod references;
 mod scopes;
 

@@ -178,9 +178,24 @@ See [`src/types.ts`](src/types.ts) for each fact's fields.
   also include `closingSpan` and `closingNameSpan`.
 - JSX tag facts include source-order `attributes` and `children`. `parentId`
   follows JSX child hierarchy, not broad lexical containment; JSX elements in
-  attribute expressions are emitted as separate root tags. Attribute values and
-  child expressions expose spans only; expressions are not evaluated. JSX text
+  attribute expressions are emitted as separate root tags. JSX text
   facts expose syntax text, not React-rendered whitespace semantics.
+- Expression attribute values and expression children expose their span and,
+  when the expression is already a static literal, a `literal: LiteralValueFact`.
+  A `LiteralValueFact` is a JSON-shaped, tagged value:
+  `{ type: "string" | "number" | "boolean" | "null" }`, `{ type: "array";
+elements }`, or `{ type: "object"; properties: { key, value }[] }` (properties
+  keep source order, including duplicates). This is a purely structural read of
+  already-literal syntax, not a constant evaluator: it materializes string,
+  finite number, boolean, `null`, no-substitution template strings, unary `+`/`-`
+  on a numeric literal, and arrays/objects composed of those. Anything else --
+  identifiers, calls, member access, `bigint`, `regexp`, non-finite numbers,
+  negative zero, spreads, array holes, computed keys, getters/setters/methods, or
+  templates with substitutions -- leaves `literal` absent, and consumers can fall
+  back to the `expressionSpan`. Numeric object keys materialize only for finite
+  safe integers; other numeric keys make the object opaque. Note the two literal sources: JSX string-attribute syntax
+  (`prop="x"`) is `{ kind: "string", value }`, while an expression container
+  (`prop={"x"}`, `prop={5}`) is `{ kind: "expression", literal }`.
 - Intrinsic (lowercase) JSX tags are not bound to lexical variables. Component
   tags carry a `bindingId` only when Oxc semantic resolution resolves the tag;
   unresolved or type-only JSX names omit it.
@@ -264,7 +279,9 @@ drop-in for Vite, esbuild, or Rolldown, and it does not:
 - handle CSS, assets, or `import.meta.url`
 - rewrite dynamic `import()` / `require()`
 - check types or reason across files
-- evaluate JSX expressions or validate prop schemas
+- evaluate or fold JSX expressions, or validate prop schemas (it materializes
+  already-literal values structurally, but does not compute `1 + 2`, resolve
+  identifiers, or run calls)
 - decide application-specific component, route, deck, or document semantics
 
 These are much larger problems, each with its own correctness burden. Folding

@@ -63,6 +63,97 @@ describe("analyze payload validation", () => {
     expect(result.diagnostics[0]?.message).toContain("Malformed Oxc analyzer payload");
   });
 
+  test("accepts JSX expression attributes carrying valid literal facts", () => {
+    const result = parseAnalyzePayloadForTest(input, {
+      abiVersion: 1,
+      kind: "analyze",
+      ok: true,
+      scopes: [],
+      bindings: [],
+      references: [],
+      unresolved: [],
+      imports: [],
+      exports: [],
+      jsxTags: [
+        {
+          id: 1,
+          name: "View",
+          kind: "identifier",
+          span: { start: 10, end: 40 },
+          nameSpan: { start: 11, end: 15 },
+          elementSpan: { start: 10, end: 40 },
+          selfClosing: true,
+          attributes: [
+            {
+              kind: "attribute",
+              name: "box",
+              nameSpan: { start: 16, end: 19 },
+              span: { start: 16, end: 38 },
+              value: {
+                kind: "expression",
+                span: { start: 20, end: 38 },
+                literal: {
+                  type: "object",
+                  properties: [
+                    { key: "x", value: { type: "number", value: 80 } },
+                    { key: "items", value: { type: "array", elements: [{ type: "null" }] } },
+                  ],
+                },
+              },
+            },
+          ],
+          children: [],
+        },
+      ],
+      diagnostics: [],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("rejects JSX expression literals that are not JSON-shaped", () => {
+    const result = parseAnalyzePayloadForTest(input, {
+      abiVersion: 1,
+      kind: "analyze",
+      ok: true,
+      scopes: [],
+      bindings: [],
+      references: [],
+      unresolved: [],
+      imports: [],
+      exports: [],
+      jsxTags: [
+        {
+          id: 1,
+          name: "View",
+          kind: "identifier",
+          span: { start: 10, end: 40 },
+          nameSpan: { start: 11, end: 15 },
+          elementSpan: { start: 10, end: 40 },
+          selfClosing: true,
+          attributes: [
+            {
+              kind: "attribute",
+              name: "n",
+              nameSpan: { start: 16, end: 17 },
+              span: { start: 16, end: 24 },
+              value: {
+                kind: "expression",
+                span: { start: 18, end: 24 },
+                literal: { type: "number", value: "80" },
+              },
+            },
+          ],
+          children: [],
+        },
+      ],
+      diagnostics: [],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics[0]?.message).toContain("Malformed Oxc analyzer payload");
+  });
+
   test("rejects JSX children with unknown kinds", () => {
     const result = parseAnalyzePayloadForTest(input, {
       abiVersion: 1,

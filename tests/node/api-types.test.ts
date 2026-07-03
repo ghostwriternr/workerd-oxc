@@ -9,6 +9,7 @@ import type {
   JsxAttributeFact,
   JsxAttributeValueFact,
   JsxChildFact,
+  LiteralValueFact,
   OxcDiagnostic,
   OxcResult,
   ReferenceFact,
@@ -171,6 +172,29 @@ describe("public API types", () => {
       span: { start: 20, end: 25 },
       expressionSpan: { start: 21, end: 24 },
     };
+    const literalValue: JsxAttributeValueFact = {
+      kind: "expression",
+      span: { start: 20, end: 40 },
+      expressionSpan: { start: 21, end: 39 },
+      literal: {
+        type: "object",
+        properties: [
+          { key: "x", value: { type: "number", value: 80 } },
+          { key: "label", value: { type: "string", value: "hi" } },
+          { key: "on", value: { type: "boolean", value: true } },
+          { key: "none", value: { type: "null" } },
+          { key: "items", value: { type: "array", elements: [{ type: "number", value: 1 }] } },
+        ],
+      },
+    };
+    const nestedLiteral: LiteralValueFact = { type: "array", elements: [{ type: "null" }] };
+    const literalChild: JsxChildFact = {
+      kind: "expression",
+      span: { start: 0, end: 3 },
+      literal: { type: "number", value: 7 },
+    };
+    // @ts-expect-error literal value objects use { key, value } property facts.
+    const invalidLiteral: LiteralValueFact = { type: "object", properties: [{ name: "x" }] };
     const attribute: JsxAttributeFact = {
       kind: "attribute",
       name: "size",
@@ -202,6 +226,10 @@ describe("public API types", () => {
 
     expect(attribute.value).toBe(stringValue);
     expect(expressionValue.expressionSpan).toEqual({ start: 21, end: 24 });
+    expect(literalValue.kind).toBe("expression");
+    expect(nestedLiteral.type).toBe("array");
+    expect(literalChild.kind).toBe("expression");
+    expect(invalidLiteral.type).toBe("object");
     expect(spread.kind).toBe("spread");
     expect(child.tagId).toBe(2);
     expect(invalidValue.kind).toBe("number");

@@ -516,6 +516,127 @@ const view = <Panel title="😀">Hi 😀</Panel>;`;
     );
   });
 
+  test("jsx expression values expose static literal facts", async () => {
+    const source = `
+      const rest = { extra: true };
+      const k = "dyn";
+      const y = 1;
+      const View = () => (
+        <Box
+          s="text"
+          n={5}
+          neg={-3}
+          f={1.5}
+          b={true}
+          nil={null}
+          tpl={\`hi\`}
+          box={{ x: 80, y: 112, width: 720, height: 92 }}
+          arr={[1, "a", false]}
+          intKeys={{ 0: "a", 1: "b" }}
+          nz={-0}
+          fracKey={{ 1.5: 1 }}
+          id={rest}
+          call={fn()}
+          spread={{ ...rest }}
+          hole={[1, , 3]}
+          computed={{ [k]: 1 }}
+          tpl2={\`x\${y}\`}
+          big={1n}
+          re={/a/g}
+        >
+          {7}
+          {rest}
+        </Box>
+      );
+    `;
+    const facts = expectOk(
+      await experimentalAnalyze({ filename: "src/literal-facts.tsx", source, lang: "tsx" }),
+    );
+
+    const box = facts.jsxTags.find((tag) => tag.name === "Box");
+    expect(box).toBeDefined();
+    const attr = (name: string) =>
+      box!.attributes.find((a) => a.kind === "attribute" && a.name === name);
+    const literalOf = (name: string) => {
+      const a = attr(name);
+      if (!a || a.kind !== "attribute" || a.value?.kind !== "expression") {
+        throw new Error(`expected expression value for ${name}`);
+      }
+      return a.value.literal;
+    };
+
+    // string attribute syntax stays kind:"string" (unchanged control)
+    const s = attr("s");
+    expect(s?.kind === "attribute" ? s.value : undefined).toMatchObject({
+      kind: "string",
+      value: "text",
+    });
+
+    expect(literalOf("n")).toEqual({ type: "number", value: 5 });
+    expect(literalOf("neg")).toEqual({ type: "number", value: -3 });
+    expect(literalOf("f")).toEqual({ type: "number", value: 1.5 });
+    expect(literalOf("b")).toEqual({ type: "boolean", value: true });
+    expect(literalOf("nil")).toEqual({ type: "null" });
+    expect(literalOf("tpl")).toEqual({ type: "string", value: "hi" });
+    expect(literalOf("box")).toEqual({
+      type: "object",
+      properties: [
+        { key: "x", value: { type: "number", value: 80 } },
+        { key: "y", value: { type: "number", value: 112 } },
+        { key: "width", value: { type: "number", value: 720 } },
+        { key: "height", value: { type: "number", value: 92 } },
+      ],
+    });
+    expect(literalOf("arr")).toEqual({
+      type: "array",
+      elements: [
+        { type: "number", value: 1 },
+        { type: "string", value: "a" },
+        { type: "boolean", value: false },
+      ],
+    });
+    expect(literalOf("intKeys")).toEqual({
+      type: "object",
+      properties: [
+        { key: "0", value: { type: "string", value: "a" } },
+        { key: "1", value: { type: "string", value: "b" } },
+      ],
+    });
+
+    // opaque expressions carry no literal:
+    // nz = negative zero (excluded from the JSON value set);
+    // fracKey = non-safe-integer numeric object key makes the object opaque.
+    const opaque = [
+      "nz",
+      "fracKey",
+      "id",
+      "call",
+      "spread",
+      "hole",
+      "computed",
+      "tpl2",
+      "big",
+      "re",
+    ];
+    for (const name of opaque) {
+      expect(literalOf(name)).toBeUndefined();
+    }
+
+    // expression children
+    const exprChildren = box!.children.filter((child) => child.kind === "expression");
+    const literalChild = exprChildren.find(
+      (child) => child.kind === "expression" && child.literal !== undefined,
+    );
+    expect(literalChild?.kind === "expression" ? literalChild.literal : undefined).toEqual({
+      type: "number",
+      value: 7,
+    });
+    const opaqueChild = exprChildren.find(
+      (child) => child.kind === "expression" && child.literal === undefined,
+    );
+    expect(opaqueChild).toBeDefined();
+  });
+
   test("jsx parent ids follow child hierarchy instead of lexical containment", async () => {
     const source = `
       const Icon = () => <svg />;
