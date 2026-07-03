@@ -48,6 +48,7 @@ pub(crate) struct ReferenceFactPayload {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ImportFactPayload {
+    pub(crate) binding_id: usize,
     pub(crate) source: String,
     pub(crate) local: String,
     pub(crate) specifier_kind: &'static str,

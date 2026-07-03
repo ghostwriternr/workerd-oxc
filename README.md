@@ -162,9 +162,10 @@ See [`src/types.ts`](src/types.ts) for each fact's fields.
 - `BindingFact.kind` reports the declaration category when Oxc exposes one,
   including `"param"`, `"type"`, `"interface"`, `"enum"`, and
   `"enum-member"`.
-- `ImportFact.specifierKind` reports the import form (`"named"`, `"default"`,
-  or `"namespace"`). Only named imports include `imported`; default and
-  namespace imports do not use sentinel strings.
+- `ImportFact.bindingId` is the semantic binding created by the import
+  specifier. `ImportFact.specifierKind` reports the import form (`"named"`,
+  `"default"`, or `"namespace"`). Only named imports include `imported`;
+  default and namespace imports do not use sentinel strings.
 - `ExportFact.kind` is a discriminant for the export form (`"named"`,
   `"default"`, or `"all"`). Named exports include `local` and `exported`;
   all-exports include `source` and include `exported` only for namespace

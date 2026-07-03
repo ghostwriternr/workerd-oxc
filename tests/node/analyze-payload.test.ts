@@ -34,7 +34,17 @@ describe("analyze payload validation", () => {
       bindings: [],
       references: [],
       unresolved: [],
-      imports: [{ source: "./mod", local: "x", imported: "default", kind: "value" }],
+      imports: [
+        {
+          source: "./mod",
+          local: "x",
+          imported: "default",
+          specifierKind: "named",
+          kind: "value",
+          span: { start: 0, end: 10 },
+          sourceSpan: { start: 15, end: 22 },
+        },
+      ],
       exports: [],
       jsxTags: [],
       diagnostics: [],

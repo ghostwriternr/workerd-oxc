@@ -1,8 +1,8 @@
 use super::{FactContext, variable_declaration_kind};
 use crate::payload::{ExportFactPayload, ImportFactPayload, SpanPayload};
 use oxc_ast::ast::{
-    BindingPattern, Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier,
-    ImportOrExportKind, ModuleExportName, Statement,
+    BindingIdentifier, BindingPattern, Declaration, ExportDefaultDeclarationKind,
+    ImportDeclarationSpecifier, ImportOrExportKind, ModuleExportName, Statement,
 };
 
 pub(crate) fn collect_imports_exports(
@@ -20,29 +20,34 @@ pub(crate) fn collect_imports_exports(
 
                 if let Some(specifiers) = &import_decl.specifiers {
                     for specifier in specifiers {
-                        let (local, imported, specifier_kind, span, spec_is_type) = match specifier
-                        {
-                            ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                                let local = spec.local.name.to_string();
-                                let imported = Some(module_export_name_to_string(&spec.imported));
-                                let span = ctx.spans.convert(spec.span);
-                                let is_type = is_type_decl || spec.import_kind.is_type();
-                                (local, imported, "named", span, is_type)
-                            }
-                            ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                                let local = spec.local.name.to_string();
-                                let span = ctx.spans.convert(spec.span);
-                                (local, None, "default", span, is_type_decl)
-                            }
-                            ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
-                                let local = spec.local.name.to_string();
-                                let span = ctx.spans.convert(spec.span);
-                                (local, None, "namespace", span, is_type_decl)
-                            }
-                        };
+                        let (binding_id, local, imported, specifier_kind, span, spec_is_type) =
+                            match specifier {
+                                ImportDeclarationSpecifier::ImportSpecifier(spec) => {
+                                    let binding_id = import_binding_id(&spec.local);
+                                    let local = spec.local.name.to_string();
+                                    let imported =
+                                        Some(module_export_name_to_string(&spec.imported));
+                                    let span = ctx.spans.convert(spec.span);
+                                    let is_type = is_type_decl || spec.import_kind.is_type();
+                                    (binding_id, local, imported, "named", span, is_type)
+                                }
+                                ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
+                                    let binding_id = import_binding_id(&spec.local);
+                                    let local = spec.local.name.to_string();
+                                    let span = ctx.spans.convert(spec.span);
+                                    (binding_id, local, None, "default", span, is_type_decl)
+                                }
+                                ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
+                                    let binding_id = import_binding_id(&spec.local);
+                                    let local = spec.local.name.to_string();
+                                    let span = ctx.spans.convert(spec.span);
+                                    (binding_id, local, None, "namespace", span, is_type_decl)
+                                }
+                            };
                         let kind = if spec_is_type { "type" } else { "value" };
 
                         imports.push(ImportFactPayload {
+                            binding_id,
                             source: source_str.clone(),
                             local,
                             specifier_kind,
@@ -206,6 +211,14 @@ pub(crate) fn collect_imports_exports(
     }
 
     (imports, exports)
+}
+
+fn import_binding_id(local: &BindingIdentifier<'_>) -> usize {
+    local
+        .symbol_id
+        .get()
+        .expect("semantic analysis should assign symbol ids to import bindings")
+        .index()
 }
 
 fn push_named_export(

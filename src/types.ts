@@ -150,6 +150,7 @@ export type ImportSpecifierKind = "named" | "default" | "namespace";
 export type ImportFact =
   | {
       specifierKind: "named";
+      bindingId: number;
       source: string;
       local: string;
       imported: string;
@@ -159,6 +160,7 @@ export type ImportFact =
     }
   | {
       specifierKind: "default" | "namespace";
+      bindingId: number;
       source: string;
       local: string;
       kind: "value" | "type";

@@ -43,12 +43,13 @@ describe("public API types", () => {
   void (undefined as MissingOptionsExport | undefined);
 
   test("analyze types align with top-level and instance signatures", async () => {
-    const input: AnalyzeInput = { filename: "src/app.tsx", source: "const x = 1;" };
-    const topLevel: Promise<OxcResult<AnalyzeOutput>> = experimentalAnalyze(input);
+    const topLevel: (input: AnalyzeInput) => Promise<OxcResult<AnalyzeOutput>> =
+      experimentalAnalyze;
     const instance = await createOxc();
-    const instanceResult: Promise<OxcResult<AnalyzeOutput>> = instance.experimentalAnalyze(input);
+    const instanceAnalyze: (input: AnalyzeInput) => Promise<OxcResult<AnalyzeOutput>> =
+      instance.experimentalAnalyze;
     void topLevel;
-    void instanceResult;
+    void instanceAnalyze;
     expect(true).toBe(true);
   });
   test("analyzer fact kinds expose semantic variants", () => {
@@ -70,6 +71,7 @@ describe("public API types", () => {
       span: { start: 0, end: 32 },
     };
     const namedImport: ImportFact = {
+      bindingId: 2,
       source: "./mod",
       local: "localName",
       imported: "exportedName",
@@ -79,6 +81,7 @@ describe("public API types", () => {
       sourceSpan: { start: 12, end: 19 },
     };
     const defaultImport: ImportFact = {
+      bindingId: 3,
       source: "./mod",
       local: "DefaultThing",
       specifierKind: "default",
@@ -113,11 +116,22 @@ describe("public API types", () => {
       span: { start: 0, end: 1 },
     };
     const invalidDefaultImport: ImportFact = {
+      bindingId: 4,
       source: "./mod",
       local: "x",
       // @ts-expect-error default imports do not use imported sentinel strings.
       imported: "default",
       specifierKind: "default",
+      kind: "value",
+      span: { start: 0, end: 1 },
+      sourceSpan: { start: 0, end: 1 },
+    };
+    // @ts-expect-error import facts always include the binding created by the import specifier.
+    const missingImportBindingId: ImportFact = {
+      source: "./mod",
+      local: "x",
+      imported: "x",
+      specifierKind: "named",
       kind: "value",
       span: { start: 0, end: 1 },
       sourceSpan: { start: 0, end: 1 },
@@ -137,6 +151,7 @@ describe("public API types", () => {
     );
     expect(invalidAllExport.kind).toBe("all");
     expect(invalidDefaultImport.specifierKind).toBe("default");
+    expect(missingImportBindingId.specifierKind).toBe("named");
   });
 
   test("reference kind only exposes emitted analyzer variants", () => {

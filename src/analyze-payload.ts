@@ -105,6 +105,7 @@ function malformedAnalyzePayload(input: AnalyzeInput): OxcResult<AnalyzeOutput> 
 
 function isImportFact(value: unknown): boolean {
   if (!isObject(value)) return false;
+  if (typeof value.bindingId !== "number" || !Number.isInteger(value.bindingId)) return false;
   if (typeof value.source !== "string" || typeof value.local !== "string") return false;
   if (value.kind !== "value" && value.kind !== "type") return false;
 

@@ -35,12 +35,14 @@ describe("experimentalAnalyze", () => {
     expect(facts.imports).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          bindingId: expect.any(Number),
           source: "./slides/title",
           local: "TitleSlide",
           specifierKind: "default",
           kind: "value",
         }),
         expect.objectContaining({
+          bindingId: expect.any(Number),
           source: "./slides/title",
           local: "color",
           imported: "accentColor",
@@ -48,6 +50,7 @@ describe("experimentalAnalyze", () => {
           kind: "value",
         }),
         expect.objectContaining({
+          bindingId: expect.any(Number),
           source: "./theme",
           local: "Theme",
           imported: "Theme",
@@ -56,6 +59,11 @@ describe("experimentalAnalyze", () => {
         }),
       ]),
     );
+
+    for (const importFact of facts.imports) {
+      const binding = facts.bindings.find((item) => item.id === importFact.bindingId);
+      expect(binding).toMatchObject({ name: importFact.local, kind: "import" });
+    }
 
     expect(facts.exports).toEqual(
       expect.arrayContaining([
