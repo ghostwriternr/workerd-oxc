@@ -1,8 +1,84 @@
 # workerd-oxc
 
-Run the official [Oxc](https://oxc.rs) WASIp1 parser and transformer bindings
-inside Cloudflare Workers. An experimental custom per-file semantic analyzer is
-also included.
+> **Deprecated.** This package is no longer maintained.
+>
+> Use the official Oxc Cloudflare Workers bindings instead:
+>
+> - [`@oxc-parser/binding-wasm32-wasip1`](https://www.npmjs.com/package/@oxc-parser/binding-wasm32-wasip1)
+> - [`@oxc-transform/binding-wasm32-wasip1`](https://www.npmjs.com/package/@oxc-transform/binding-wasm32-wasip1)
+> - demo: [Boshen/oxc-wasip1-workers](https://github.com/Boshen/oxc-wasip1-workers)
+>
+> `experimentalAnalyze` has **no drop-in replacement**. If you need semantic
+> facts, build a thin project-owned analyzer over the official parser for the
+> facts your product actually needs.
+
+This package began as a way to run Oxc inside Cloudflare Workers before
+upstream shipped WASIp1 `/workerd` loaders. That path is now official, and the
+real consumer of this package migrated off it onto a domain-specific analyzer.
+Keeping a generic adapter here no longer pays for itself.
+
+The final published surface still wraps the official parser/transform bindings
+and retains the experimental custom analyzer for historical consumers, but new
+code should not depend on it.
+
+## Migration
+
+### Parse / transform
+
+Replace `workerd-oxc` with the official packages:
+
+```ts
+import parserWasm from "@oxc-parser/binding-wasm32-wasip1/wasm.wasm";
+import { instantiate as instantiateParser } from "@oxc-parser/binding-wasm32-wasip1/workerd";
+import transformWasm from "@oxc-transform/binding-wasm32-wasip1/wasm.wasm";
+import { instantiate as instantiateTransform } from "@oxc-transform/binding-wasm32-wasip1/workerd";
+
+const parser = await instantiateParser(parserWasm);
+const transformer = await instantiateTransform(transformWasm);
+
+const parsed = parser.parseSync("app.tsx", source);
+const transformed = transformer.transformSync("app.tsx", source, {
+  lang: "tsx",
+  sourceType: "module",
+  target: "es2022",
+  jsx: { runtime: "automatic", importSource: "react" },
+});
+```
+
+Worker config needs Node.js compatibility and compiled Wasm module rules:
+
+```jsonc
+{
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": [
+        "**/parser.wasm32-wasip1.wasm",
+        "**/transform.wasm32-wasip1.wasm",
+      ],
+      "fallthrough": true,
+    },
+  ],
+}
+```
+
+### `experimentalAnalyze`
+
+There is no upstream equivalent of this package's fact schema. Do not look for
+another generic package. Prefer:
+
+1. parse with `@oxc-parser/binding-wasm32-wasip1`
+2. extract only the facts your product needs
+3. keep that analyzer next to the product that owns the source language
+
+A real migration took that path successfully: lean bindings / imports / JSX
+facts over the official parser, with no remaining `workerd-oxc` dependency.
+
+## Historical API
+
+The last supported API remains available on already-published versions for
+existing lockfiles, but it should not be adopted:
 
 ```ts
 import { transform } from "workerd-oxc";
@@ -14,7 +90,7 @@ const result = await transform({
 });
 
 if (result.ok) {
-  result.value.code; // '...jsx("main", { children: "Hello" })...'
+  result.value.code;
 }
 ```
 
@@ -24,29 +100,8 @@ if (result.ok) {
 npm install workerd-oxc
 ```
 
-The upstream Oxc packages and this package ship prebuilt `.wasm` artifacts, so
-consumers do not need a Rust toolchain. Building the custom analyzer from a
-source checkout does; see [Building from source](#building-from-source).
-
-Enable Node.js compatibility and classify dependency `.wasm` files as compiled
-modules in `wrangler.jsonc`:
-
-```jsonc
-{
-  "compatibility_flags": ["nodejs_compat"],
-  "rules": [
-    {
-      "type": "CompiledWasm",
-      "globs": [
-        "**/parser.wasm32-wasip1.wasm",
-        "**/transform.wasm32-wasip1.wasm",
-        "**/analyze.wasm",
-      ],
-      "fallthrough": true,
-    },
-  ],
-}
-```
+Prefer installing the official Oxc packages directly. This package is frozen
+and deprecated.
 
 ## Getting started
 
@@ -275,9 +330,9 @@ deferred `/workerd` loaders that accept statically imported, precompiled
 result and diagnostic API.
 
 The experimental analyzer remains a small custom Rust module
-([`native/analyze`](native/analyze)) because the official bindings do not expose
-the semantic fact model. It uses the shared C ABI in [`native/abi`](native/abi)
-and remains a zero-import `wasm32-unknown-unknown` module.
+([`native/analyze`](native/analyze)) only for historical consumers. New projects
+should not depend on it. Prefer a project-owned fact extractor over the
+official parser.
 
 ## Scope and non-goals
 

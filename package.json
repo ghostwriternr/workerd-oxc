@@ -1,7 +1,7 @@
 {
   "name": "workerd-oxc",
   "version": "0.6.0",
-  "description": "Cloudflare Workers adapter for the official Oxc WASIp1 bindings.",
+  "description": "Deprecated. Use @oxc-parser/binding-wasm32-wasip1 and @oxc-transform/binding-wasm32-wasip1 instead.",
   "keywords": [
     "cloudflare-workers",
     "jsx",
