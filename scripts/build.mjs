@@ -9,6 +9,4 @@ const dts = readFileSync(dtsPath, "utf8");
 writeFileSync(dtsPath, dts.replace(/\n?\/\/# sourceMappingURL=index\.d\.ts\.map\s*$/, "\n"));
 
 mkdirSync("dist/wasm", { recursive: true });
-copyFileSync("src/wasm/parser.wasm", join("dist", "wasm", "parser.wasm"));
-copyFileSync("src/wasm/transform.wasm", join("dist", "wasm", "transform.wasm"));
 copyFileSync("src/wasm/analyze.wasm", join("dist", "wasm", "analyze.wasm"));

@@ -1,3 +1,5 @@
+import parserModule from "@oxc-parser/binding-wasm32-wasip1/wasm.wasm";
+import { instantiate } from "@oxc-parser/binding-wasm32-wasip1/workerd";
 import { describe, expect, test } from "vitest";
 
 import { createOxc, parse } from "../../src/index";
@@ -48,5 +50,14 @@ describe("parse", () => {
     expect(
       ast.body.some((node) => (node as { type?: string }).type === "VariableDeclaration"),
     ).toBe(true);
+  });
+
+  test("reports the serialized program length in UTF-8 bytes", async () => {
+    const source = `export const value = "café";`;
+    const utf8 = expectOk(await parse({ filename: "src/utf8.ts", source }));
+    const parser = await instantiate(parserModule);
+    const direct = parser.parseSync("src/utf8.ts", source);
+
+    expect(utf8.rawProgramLength).toBe(new TextEncoder().encode(String(direct.program)).byteLength);
   });
 });

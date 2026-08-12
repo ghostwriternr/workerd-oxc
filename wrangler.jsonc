@@ -2,6 +2,18 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "workerd-oxc-tests",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-30",
+  "compatibility_date": "2026-08-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": [
+        "**/parser.wasm32-wasip1.wasm",
+        "**/transform.wasm32-wasip1.wasm",
+        "**/analyze.wasm",
+      ],
+      "fallthrough": true,
+    },
+  ],
   "worker_loaders": [{ "binding": "LOADER" }],
 }

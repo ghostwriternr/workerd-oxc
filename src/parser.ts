@@ -1,19 +1,12 @@
-import parserModule from "./wasm/parser.wasm";
+import parserModule from "@oxc-parser/binding-wasm32-wasip1/wasm.wasm";
+import { dispose, instantiate } from "@oxc-parser/binding-wasm32-wasip1/workerd";
 
-import { collectArrayLike, normalizeNativeDiagnostic } from "./abi/diagnostics.ts";
-import { createAbiOperationRuntime, isRuntimeError } from "./abi/operation.ts";
-import { isTypeScriptFilename, languageForFilename, stringifyJsonOptions } from "./source.ts";
+import { normalizeNativeDiagnostic } from "./abi/diagnostics.ts";
+import { runtimeDiagnostic } from "./diagnostics.ts";
+import { isTypeScriptFilename, languageForFilename } from "./source.ts";
 import type { OxcProgramAst, OxcResult, ParseInput, ParseOutput } from "./types.ts";
-import type { ParserAbiExports } from "./abi/instance.ts";
 
-interface DirectParsePayload {
-  abiVersion?: unknown;
-  kind?: unknown;
-  ok?: unknown;
-  rawProgramLength?: unknown;
-  payload?: unknown;
-  diagnostics?: unknown;
-}
+type ParserBinding = Awaited<ReturnType<typeof instantiate>>;
 
 interface OxcJsonAstPayload {
   node?: unknown;
@@ -21,87 +14,86 @@ interface OxcJsonAstPayload {
 }
 
 export interface ParserRuntime {
-  parse(input: ParseInput): OxcResult<ParseOutput>;
+  parse(input: ParseInput): Promise<OxcResult<ParseOutput>>;
 }
 
-export function createParserRuntime(): ParserRuntime {
-  const runtime = createAbiOperationRuntime<ParserAbiExports>({
-    module: parserModule,
-    label: "Oxc parser",
-  });
+let bindingPromise: Promise<ParserBinding> | undefined;
 
+export function createParserRuntime(): ParserRuntime {
   return {
-    parse(input) {
-      const payload = runtime.call<DirectParsePayload>({
-        filename: input.filename,
-        source: input.source,
-        optionsJson: stringifyJsonOptions(parseOptions(input), "Oxc parser"),
-        invoke: (exports, args) => exports.parse(...args),
-      });
-      if (isRuntimeError(payload)) return { ok: false, diagnostics: [payload.runtimeError] };
-      return parsePayload(input, payload);
+    async parse(input) {
+      try {
+        const parser = await getBinding();
+        const result = parser.parseSync(input.filename, input.source, parseOptions(input));
+        const diagnostics = result.errors.map((value) =>
+          normalizeNativeDiagnostic({
+            filename: input.filename,
+            source: input.source,
+            phase: "parse",
+            offsetEncoding: "utf16",
+            value,
+          }),
+        );
+
+        if (diagnostics.some(({ severity }) => severity === "error")) {
+          return { ok: false, diagnostics };
+        }
+
+        const rawProgram = result.program as unknown;
+        const rawProgramLength =
+          typeof rawProgram === "string"
+            ? new TextEncoder().encode(String(rawProgram)).byteLength
+            : 0;
+        const ast = materializeProgram(rawProgram);
+        if (!isProgramAst(ast)) {
+          return {
+            ok: false,
+            diagnostics: [
+              {
+                phase: "parse",
+                severity: "error",
+                message: "Oxc parser payload did not materialize to a Program AST.",
+                filename: input.filename,
+              },
+            ],
+          };
+        }
+
+        return { ok: true, value: { ast, rawProgramLength }, diagnostics };
+      } catch (error) {
+        return {
+          ok: false,
+          diagnostics: [runtimeDiagnostic("parse", "Oxc parser runtime failed.", error)],
+        };
+      }
     },
   };
 }
 
-function parsePayload(input: ParseInput, payload: DirectParsePayload): OxcResult<ParseOutput> {
-  const rawProgramLength =
-    typeof payload.rawProgramLength === "number" ? payload.rawProgramLength : 0;
-  const diagnostics = collectArrayLike(payload.diagnostics).map((value) =>
-    normalizeNativeDiagnostic({
-      filename: input.filename,
-      source: input.source,
-      phase: "parse",
-      value,
-    }),
-  );
-
-  if (payload.ok !== true) {
-    return {
-      ok: false,
-      diagnostics:
-        diagnostics.length > 0
-          ? diagnostics
-          : [
-              {
-                phase: "parse",
-                severity: "error",
-                message: "Oxc parser failed without structured diagnostics.",
-                filename: input.filename,
-              },
-            ],
-    };
-  }
-
-  const ast = materializeOxcAstPayload(payload.payload as OxcJsonAstPayload);
-  if (!isProgramAst(ast)) {
-    return {
-      ok: false,
-      diagnostics: [
-        {
-          phase: "parse",
-          severity: "error",
-          message: "Oxc parser payload did not materialize to a Program AST.",
-          filename: input.filename,
-        },
-      ],
-    };
-  }
-
-  return { ok: true, value: { ast, rawProgramLength }, diagnostics };
+function getBinding(): Promise<ParserBinding> {
+  bindingPromise ??= instantiate(parserModule).catch(async (error: unknown) => {
+    bindingPromise = undefined;
+    await dispose().catch(() => undefined);
+    throw error;
+  });
+  return bindingPromise;
 }
 
-function parseOptions(input: ParseInput): Record<string, unknown> {
+function parseOptions(input: ParseInput) {
   return {
     lang: input.lang ?? languageForFilename(input.filename),
     sourceType: input.sourceType ?? "module",
     astType: input.astType ?? (isTypeScriptFilename(input.filename) ? "ts" : "js"),
     range: input.range ?? false,
     preserveParens: input.preserveParens ?? false,
-  };
+  } as const;
 }
 
-function materializeOxcAstPayload({ node, fixes = [] }: OxcJsonAstPayload): unknown {
+function materializeProgram(rawProgram: unknown): unknown {
+  if (typeof rawProgram !== "string") return rawProgram;
+
+  const payload = JSON.parse(String(rawProgram)) as OxcJsonAstPayload;
+  const { node, fixes = [] } = payload;
   if (node !== undefined) {
     for (const fixPath of fixes) applyLiteralFix(node, fixPath);
   }

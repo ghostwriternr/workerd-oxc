@@ -2,14 +2,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 const artifacts = [
   {
-    path: "src/wasm/parser.wasm",
-    requiredFunction: "parse",
-  },
-  {
-    path: "src/wasm/transform.wasm",
-    requiredFunction: "transform",
-  },
-  {
     path: "src/wasm/analyze.wasm",
     requiredFunction: "analyze",
   },

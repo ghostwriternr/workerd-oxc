@@ -11,6 +11,6 @@ export default defineConfig({
   hash: false,
   deps: {
     skipNodeModulesBundle: true,
-    neverBundle: ["./wasm/parser.wasm", "./wasm/transform.wasm", "./wasm/analyze.wasm"],
+    neverBundle: ["./wasm/analyze.wasm"],
   },
 });

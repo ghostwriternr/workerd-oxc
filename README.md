@@ -1,7 +1,8 @@
 # workerd-oxc
 
-Run the [Oxc](https://oxc.rs) parser and transformer inside Cloudflare Workers.
-An experimental per-file semantic analyzer is also included.
+Run the official [Oxc](https://oxc.rs) WASIp1 parser and transformer bindings
+inside Cloudflare Workers. An experimental custom per-file semantic analyzer is
+also included.
 
 ```ts
 import { transform } from "workerd-oxc";
@@ -23,9 +24,29 @@ if (result.ok) {
 npm install workerd-oxc
 ```
 
-The npm package ships prebuilt `.wasm` artifacts, so consumers do not need a
-Rust toolchain. Building from a source checkout does; see
-[Building from source](#building-from-source).
+The upstream Oxc packages and this package ship prebuilt `.wasm` artifacts, so
+consumers do not need a Rust toolchain. Building the custom analyzer from a
+source checkout does; see [Building from source](#building-from-source).
+
+Enable Node.js compatibility and classify dependency `.wasm` files as compiled
+modules in `wrangler.jsonc`:
+
+```jsonc
+{
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": [
+        "**/parser.wasm32-wasip1.wasm",
+        "**/transform.wasm32-wasip1.wasm",
+        "**/analyze.wasm",
+      ],
+      "fallthrough": true,
+    },
+  ],
+}
+```
 
 ## Getting started
 
@@ -242,28 +263,21 @@ passed in.
 ```
 your Worker
   └─ workerd-oxc
-       ├─ dist/wasm/parser.wasm      (wasm32-unknown-unknown, 0 imports)
-       ├─ dist/wasm/transform.wasm   (wasm32-unknown-unknown, 0 imports)
-       ├─ dist/wasm/analyze.wasm     (wasm32-unknown-unknown, 0 imports)
-       └─ a shared pointer/length/result ABI in JavaScript and Rust
+       ├─ @oxc-parser/binding-wasm32-wasip1
+       ├─ @oxc-transform/binding-wasm32-wasip1
+       └─ dist/wasm/analyze.wasm     (custom, 0 imports)
 ```
 
 Workers can't compile WebAssembly at runtime — no `WebAssembly.compile`, no
-fetching `.wasm` over the network, no threads. That rules out the stock Oxc
-WASI and browser builds, which expect one or more of those. `workerd-oxc`
-sidesteps the problem by shipping Oxc as static, zero-import
-`WebAssembly.Module` artifacts.
+fetching `.wasm` over the network, no threads. The official Oxc packages expose
+deferred `/workerd` loaders that accept statically imported, precompiled
+`WebAssembly.Module` values. `workerd-oxc` maps those bindings onto its existing
+result and diagnostic API.
 
-The `.wasm` files are Rust crates ([`native/`](native)) that wrap the Oxc
-parser, transformer, and semantic analyzer and expose a handful of C-ABI
-functions (`alloc`, `parse`/`transform`/`analyze`, `result_ptr`,
-`free_result`, …). The TypeScript host writes UTF-8 into Wasm memory, calls in,
-and reads a JSON result back out.
-
-There is no N-API, no emnapi, no WASI, no runtime `WebAssembly.compile`, no
-browser `Worker`, and no shared memory. The modules import nothing —
-`WebAssembly.Module.imports(module)` is `[]` — which is what makes them
-loadable in workerd.
+The experimental analyzer remains a small custom Rust module
+([`native/analyze`](native/analyze)) because the official bindings do not expose
+the semantic fact model. It uses the shared C ABI in [`native/abi`](native/abi)
+and remains a zero-import `wasm32-unknown-unknown` module.
 
 ## Scope and non-goals
 
@@ -306,21 +320,21 @@ Loader wiring is left to you — it is not part of this package's API.
 
 ## Building from source
 
-Requires Rust 1.95.0 with the `wasm32-unknown-unknown` target. The repo
-includes `rust-toolchain.toml`, so `rustup` installs the right toolchain and
-target automatically.
+Building the custom analyzer requires Rust 1.95.0 with the
+`wasm32-unknown-unknown` target. The repo includes `rust-toolchain.toml`, so
+`rustup` installs the right toolchain and target automatically.
 
 ```sh
-npm run build:wasm   # generates src/wasm/{parser,transform,analyze}.wasm
-npm run build        # build:wasm, then copies artifacts into dist/wasm/
+npm run build:wasm   # generates src/wasm/analyze.wasm
+npm run build        # builds the adapter and copies the analyzer into dist
 ```
 
-The artifacts are shipped in the npm package because Workers load them as
-static `WebAssembly.Module` imports; runtime consumers never build them.
-Inspect or verify them with:
+The analyzer is shipped in the npm package because Workers load it as a static
+`WebAssembly.Module` import; runtime consumers never build it. Inspect or verify
+it with:
 
 ```sh
-npm run wasm:info    # size / hash / imports / exports per artifact
+npm run wasm:info    # size / hash / imports / exports
 npm run wasm:check   # asserts zero imports and the expected ABI exports
 ```
 

@@ -8,26 +8,39 @@ export interface NativeDiagnosticLike {
   file?: unknown;
   start?: unknown;
   end?: unknown;
+  labels?: unknown;
 }
 
 export function normalizeNativeDiagnostic(input: {
   filename: string;
   source: string;
   phase: OxcDiagnostic["phase"];
+  offsetEncoding?: "utf8" | "utf16";
   value: unknown;
 }): OxcDiagnostic {
   const direct = input.value as NativeDiagnosticLike;
+  const label = Array.isArray(direct.labels)
+    ? (direct.labels[0] as NativeDiagnosticLike)
+    : undefined;
+  const rawStart = typeof direct.start === "number" ? direct.start : label?.start;
+  const rawEnd = typeof direct.end === "number" ? direct.end : label?.end;
   const start =
-    typeof direct.start === "number"
-      ? byteOffsetToStringOffset(input.source, direct.start)
+    typeof rawStart === "number"
+      ? input.offsetEncoding === "utf16"
+        ? rawStart
+        : byteOffsetToStringOffset(input.source, rawStart)
       : undefined;
   const end =
-    typeof direct.end === "number" ? byteOffsetToStringOffset(input.source, direct.end) : undefined;
+    typeof rawEnd === "number"
+      ? input.offsetEncoding === "utf16"
+        ? rawEnd
+        : byteOffsetToStringOffset(input.source, rawEnd)
+      : undefined;
   const location = start === undefined ? undefined : sourceLocationAtOffset(input.source, start);
 
   return {
     phase: input.phase,
-    severity: direct.severity === "warning" ? "warning" : "error",
+    severity: direct.severity === "warning" || direct.severity === "Warning" ? "warning" : "error",
     message: typeof direct.message === "string" ? direct.message : String(input.value),
     filename:
       typeof direct.file === "string" && direct.file.length > 0 ? direct.file : input.filename,

@@ -10,28 +10,6 @@ export interface OxcAbiExports extends WebAssembly.Exports {
   free_result: (handle: number) => void;
 }
 
-export interface ParserAbiExports extends OxcAbiExports {
-  parse: (
-    filenamePtr: number,
-    filenameLen: number,
-    sourcePtr: number,
-    sourceLen: number,
-    optionsPtr: number,
-    optionsLen: number,
-  ) => number;
-}
-
-export interface TransformAbiExports extends OxcAbiExports {
-  transform: (
-    filenamePtr: number,
-    filenameLen: number,
-    sourcePtr: number,
-    sourceLen: number,
-    optionsPtr: number,
-    optionsLen: number,
-  ) => number;
-}
-
 export interface AnalyzeAbiExports extends OxcAbiExports {
   analyze: (
     filenamePtr: number,

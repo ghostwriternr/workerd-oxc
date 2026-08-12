@@ -29,7 +29,19 @@ try {
       {
         name: "workerd-oxc-packed-consumer",
         main: "tests/entry.ts",
-        compatibility_date: "2026-06-30",
+        compatibility_date: "2026-08-10",
+        compatibility_flags: ["nodejs_compat"],
+        rules: [
+          {
+            type: "CompiledWasm",
+            globs: [
+              "**/parser.wasm32-wasip1.wasm",
+              "**/transform.wasm32-wasip1.wasm",
+              "**/analyze.wasm",
+            ],
+            fallthrough: true,
+          },
+        ],
       },
       null,
       2,
@@ -89,8 +101,8 @@ try {
       "--ignore-scripts",
       "--save-dev",
       "vitest@4.1.9",
-      "@cloudflare/vitest-pool-workers@0.17.0",
-      "wrangler@4.106.0",
+      "@cloudflare/vitest-pool-workers@0.21.2",
+      "wrangler@4.122.0",
       "typescript@6.0.3",
       tarball,
     ],

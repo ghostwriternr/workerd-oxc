@@ -8,8 +8,6 @@ const files = [
   "dist/transform.js",
   "dist/analyze.js",
   "dist/source.js",
-  "dist/wasm/parser.wasm",
-  "dist/wasm/transform.wasm",
   "dist/wasm/analyze.wasm",
 ];
 
@@ -39,8 +37,8 @@ for (const file of jsFiles) {
 
 const combinedJs = [...jsByFile.values()].join("\n");
 for (const expectedImport of [
-  "./wasm/parser.wasm",
-  "./wasm/transform.wasm",
+  "@oxc-parser/binding-wasm32-wasip1/wasm.wasm",
+  "@oxc-transform/binding-wasm32-wasip1/wasm.wasm",
   "./wasm/analyze.wasm",
 ]) {
   if (!combinedJs.includes(expectedImport)) {

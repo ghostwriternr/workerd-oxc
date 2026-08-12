@@ -31,12 +31,6 @@ const expectedFiles = [
   "package/native/analyze/src/lib.rs",
   "package/native/analyze/src/payload.rs",
   "package/native/analyze/src/source.rs",
-  "package/dist/wasm/parser.wasm",
-  "package/dist/wasm/transform.wasm",
-  "package/native/parser/Cargo.toml",
-  "package/native/parser/src/lib.rs",
-  "package/native/transform/Cargo.toml",
-  "package/native/transform/src/lib.rs",
   "package/package.json",
   "package/rust-toolchain.toml",
 ];
